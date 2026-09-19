@@ -1,0 +1,165 @@
+import os
+import json
+from typing import Dict, Any, List, Optional
+from google import genai
+from google.genai import types
+
+def get_gemini_client(api_key: Optional[str] = None) -> Optional[genai.Client]:
+    key = api_key or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+    if not key:
+        return None
+    try:
+        return genai.Client(api_key=key)
+    except Exception as e:
+        print(f"Error initializing Gemini client: {e}")
+        return None
+
+def gemini_enhance_summary(client: genai.Client, model: str, candidate_text: str, role_title: str, requirements: List[Dict[str, Any]]) -> Optional[str]:
+    try:
+        req_list = "\n".join([f"- {r.get('title')}: {r.get('description')}" for r in requirements[:6]])
+        prompt = f"""You are HireFlow, an AI recruitment intelligence specialist.
+Analyze this candidate's resume against the role '{role_title}'.
+
+JOB REQUIREMENTS:
+{req_list}
+
+CANDIDATE RESUME:
+{candidate_text[:4000]}
+
+Generate a concise 3-paragraph executive candidate summary for the hiring manager:
+1. Candidate Elevator Pitch & career trajectory (years of experience, core domains).
+2. Key Strengths directly mapped to the role requirements with specific metrics or achievements.
+3. Critical Gaps, unverified claims, or risks to explore during interviews.
+Format in crisp Markdown with bold key terms.
+"""
+        response = client.interactions.create(
+            model=model,
+            input=prompt
+        )
+        return response.output_text
+    except Exception as e:
+        print(f"Gemini enhance summary failed: {e}")
+        return None
+
+def gemini_generate_questions(client: genai.Client, model: str, candidate_text: str, role_title: str, mappings: List[Dict[str, Any]]) -> Optional[List[Dict[str, Any]]]:
+    try:
+        mappings_summary = "\n".join([
+            f"- {m.get('title')} (Status: {m.get('status')}): {m.get('citation', {}).get('snippet', '')}"
+            for m in mappings[:5]
+        ])
+        prompt = f"""You are HireFlow's interview intelligence agent.
+Generate 4 highly specific, role-tailored interview questions for this candidate applying for '{role_title}'.
+
+REQUIREMENT MAPPINGS:
+{mappings_summary}
+
+CANDIDATE RESUME EXCERPTS:
+{candidate_text[:3500]}
+
+Return a strict JSON array with 4 objects. Each object MUST have:
+- "id": "q-ai-1", "q-ai-2", etc.
+- "category": ("Technical Competency" | "Architecture & Production Scale" | "Gap Validation" | "Behavioral & Leadership")
+- "competency": the skill or topic name
+- "question": the specific, deep interview question
+- "resume_context": exact context from their resume that motivated this question
+- "evaluation_criteria": {{"strong_signal": "...", "red_flag": "..."}}
+
+Respond ONLY with valid JSON array, no extra markdown backticks or commentary if possible.
+"""
+        response = client.interactions.create(
+            model=model,
+            input=prompt
+        )
+        text = response.output_text.strip()
+        # Clean potential markdown fences
+        if text.startswith("```"):
+            text = text.split("```", 2)[1]
+            if text.startswith("json"):
+                text = text[4:]
+        data = json.loads(text.strip())
+        if isinstance(data, list):
+            return data
+    except Exception as e:
+        print(f"Gemini generate questions failed: {e}")
+    return None
+
+def gemini_dynamic_follow_up(client: genai.Client, model: str, question: str, candidate_answer: str, focus: str) -> Optional[List[Dict[str, str]]]:
+    try:
+        prompt = f"""You are an expert technical interviewer.
+The candidate was asked:
+"{question}"
+
+The candidate responded:
+"{candidate_answer}"
+
+The interviewer requested follow-up questions focusing on: "{focus}".
+Generate 2-3 laser-targeted follow-up questions to probe the candidate's actual depth, individual contribution, or failure mode handling.
+Return a strict JSON array of objects with keys "prompt" and "rationale".
+Only JSON.
+"""
+        response = client.interactions.create(
+            model=model,
+            input=prompt
+        )
+        text = response.output_text.strip()
+        if text.startswith("```"):
+            text = text.split("```", 2)[1]
+            if text.startswith("json"):
+                text = text[4:]
+        data = json.loads(text.strip())
+        if isinstance(data, list):
+            return data
+    except Exception as e:
+        print(f"Gemini dynamic follow-up failed: {e}")
+    return None
+
+def gemini_evaluate_notes(client: genai.Client, model: str, notes: str, role_title: str, requirements: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    try:
+        req_list = "\n".join([f"- {r.get('title')}: {r.get('description')}" for r in requirements[:8]])
+        prompt = f"""You are an executive hiring bar raiser evaluating candidate interview notes for '{role_title}'.
+
+JOB REQUIREMENTS:
+{req_list}
+
+INTERVIEW NOTES:
+{notes}
+
+Synthesize these notes and provide:
+1. Recommendation: ("STRONG HIRE" | "HIRE" | "LEAN NO" | "STRONG NO")
+2. Dimension Scores (0-100): technical_competency, problem_solving, communication, role_fit
+3. Executive Summary (2-3 sentences)
+4. Identified Unanswered Evaluation Areas: list of job requirements that were NOT covered in the interview, with suggested follow-up questions.
+
+Return JSON in this format:
+{{
+  "recommendation": "HIRE",
+  "recommendation_color": "blue",
+  "overall_score": 82,
+  "dimension_scores": {{
+    "technical_competency": 85,
+    "problem_solving": 80,
+    "communication": 82,
+    "role_fit": 80
+  }},
+  "executive_summary": "...",
+  "unanswered_areas": [
+    {{"requirement_title": "...", "suggested_question": "..."}}
+  ]
+}}
+Only JSON output.
+"""
+        response = client.interactions.create(
+            model=model,
+            input=prompt
+        )
+        text = response.output_text.strip()
+        if text.startswith("```"):
+            text = text.split("```", 2)[1]
+            if text.startswith("json"):
+                text = text[4:]
+        data = json.loads(text.strip())
+        if isinstance(data, dict) and "recommendation" in data:
+            return data
+    except Exception as e:
+        print(f"Gemini evaluate notes failed: {e}")
+    return None
