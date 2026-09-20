@@ -1,0 +1,141 @@
+// HireFlow API Client
+const API = {
+  baseUrl: '/api',
+
+  async getRoles() {
+    const res = await fetch(`${this.baseUrl}/roles`);
+    if (!res.ok) throw new Error('Failed to fetch roles');
+    return res.json();
+  },
+
+  async createRole(roleData) {
+    const res = await fetch(`${this.baseUrl}/roles`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(roleData)
+    });
+    if (!res.ok) throw new Error('Failed to create role');
+    return res.json();
+  },
+
+  async deleteRole(roleId) {
+    const res = await fetch(`${this.baseUrl}/roles/${roleId}`, {
+      method: 'DELETE'
+    });
+    if (!res.ok) throw new Error('Failed to delete role');
+    return res.json();
+  },
+
+  async getRoleCandidates(roleId) {
+    const res = await fetch(`${this.baseUrl}/roles/${roleId}/candidates`);
+    if (!res.ok) throw new Error('Failed to fetch candidates');
+    return res.json();
+  },
+
+  async uploadResumes(roleId, files) {
+    const formData = new FormData();
+    for (let i = 0; i < files.length; i++) {
+      formData.append('files', files[i]);
+    }
+    const res = await fetch(`${this.baseUrl}/roles/${roleId}/upload-resumes`, {
+      method: 'POST',
+      body: formData
+    });
+    if (!res.ok) throw new Error('Failed to upload resumes');
+    return res.json();
+  },
+
+  async getCandidate(candidateId) {
+    const res = await fetch(`${this.baseUrl}/candidates/${candidateId}`);
+    if (!res.ok) throw new Error('Failed to fetch candidate details');
+    return res.json();
+  },
+
+  async deleteCandidate(candidateId) {
+    const res = await fetch(`${this.baseUrl}/candidates/${candidateId}`, {
+      method: 'DELETE'
+    });
+    if (!res.ok) throw new Error('Failed to delete candidate');
+    return res.json();
+  },
+
+  async getInterview(candidateId) {
+    const res = await fetch(`${this.baseUrl}/candidates/${candidateId}/interview`);
+    if (!res.ok) throw new Error('Failed to fetch interview');
+    return res.json();
+  },
+
+  async saveInterview(candidateId, interviewData) {
+    const res = await fetch(`${this.baseUrl}/candidates/${candidateId}/interview`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(interviewData)
+    });
+    if (!res.ok) throw new Error('Failed to save interview notes');
+    return res.json();
+  },
+
+  async requestFollowUp(candidateId, question, candidateAnswer, focusArea = 'depth') {
+    const res = await fetch(`${this.baseUrl}/candidates/${candidateId}/follow-up`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        question,
+        candidate_answer: candidateAnswer,
+        focus_area: focusArea
+      })
+    });
+    if (!res.ok) throw new Error('Failed to generate follow-up question');
+    return res.json();
+  },
+
+  async evaluateInterview(candidateId, notes) {
+    const res = await fetch(`${this.baseUrl}/candidates/${candidateId}/evaluate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ notes })
+    });
+    if (!res.ok) throw new Error('Failed to evaluate interview');
+    return res.json();
+  },
+
+  async queryCandidates(roleId, query) {
+    const res = await fetch(`${this.baseUrl}/roles/${roleId}/query`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query })
+    });
+    if (!res.ok) throw new Error('Failed to query candidate pool');
+    return res.json();
+  },
+
+  async getSettings() {
+    const res = await fetch(`${this.baseUrl}/settings`);
+    if (!res.ok) throw new Error('Failed to fetch settings');
+    return res.json();
+  },
+
+  async updateSettings(settings) {
+    const res = await fetch(`${this.baseUrl}/settings`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(settings)
+    });
+    if (!res.ok) throw new Error('Failed to update settings');
+    return res.json();
+  },
+
+  async seedDemo() {
+    const res = await fetch(`${this.baseUrl}/seed-demo`, {
+      method: 'POST'
+    });
+    if (!res.ok) throw new Error('Failed to seed demo data');
+    return res.json();
+  },
+
+  async getAuditTrail() {
+    const res = await fetch(`${this.baseUrl}/audit-trail`);
+    if (!res.ok) throw new Error('Failed to fetch audit trail');
+    return res.json();
+  }
+};
