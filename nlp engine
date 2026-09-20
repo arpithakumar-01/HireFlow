@@ -1,0 +1,558 @@
+import re
+import math
+from typing import Dict, Any, List, Tuple
+
+def _find_best_evidence_in_resume(query_text: str, candidate_data: Dict[str, Any]) -> Tuple[str, str, int, float]:
+    """
+    Searches candidate text/lines for strongest evidence matching the requirement query.
+    Returns: (evidence_snippet, section_name, line_no, match_confidence)
+    """
+    raw_text = candidate_data.get("raw_text", "")
+    lines = candidate_data.get("structured_lines", [])
+    sections = candidate_data.get("sections", {})
+    
+    # Extract significant tokens from query
+    words = re.findall(r'[a-zA-Z0-9_\+#\.]+', query_text.lower())
+    stopwords = {"and", "or", "in", "with", "for", "to", "at", "by", "of", "a", "an", "the", "years", "year", "experience", "demonstrated", "strong", "proficient", "knowledge", "working"}
+    query_tokens = [w for w in words if len(w) > 1 and w not in stopwords]
+    
+    if not query_tokens:
+        return ("", "General", 0, 0.0)
+
+    best_score = 0.0
+    best_snippet = ""
+    best_line_no = 0
+    best_section = "Experience"
+
+    # 1. Search line by line for precise citation
+    for line_obj in lines:
+        line_text = line_obj.get("text", "")
+        line_lower = line_text.lower()
+        
+        matches = sum(1 for token in query_tokens if token in line_lower)
+        if matches > 0:
+            # Score based on token coverage
+            score = matches / len(query_tokens)
+            # Boost if line contains metrics/action verbs
+            if re.search(r'\b(designed|built|led|reduced|improved|migrated|scaled|implemented|engineered|\d+%|\$\d+)\b', line_lower):
+                score += 0.25
+            
+            if score > best_score:
+                best_score = score
+                best_snippet = line_text
+                best_line_no = line_obj.get("line_no", 1)
+
+    # 2. Identify likely section
+    if best_snippet:
+        for sec_name, sec_text in sections.items():
+            if best_snippet in sec_text:
+                best_section = sec_name.title()
+                break
+
+    # Normalize score 0.0 - 1.0
+    best_score = min(best_score, 1.0)
+    return (best_snippet, best_section, best_line_no, best_score)
+
+def evaluate_requirement_mapping(requirements: List[Dict[str, Any]], candidate_data: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], float, List[Dict[str, Any]]]:
+    """
+    Maps each requirement from JD to candidate's resume.
+    Returns: (mappings, total_match_percentage, red_flags)
+    """
+    mappings = []
+    total_score = 0.0
+    cand_exp = candidate_data.get("years_experience", 0)
+    cand_skills_lower = [s.lower() for s in candidate_data.get("skills", [])]
+    cand_full_text = candidate_data.get("raw_text", "").lower()
+    
+    red_flags = []
+
+    for req in requirements:
+        req_id = req.get("id")
+        req_title = req.get("title", "")
+        req_desc = req.get("description", "")
+        req_cat = req.get("category", "Must-Have")
+        weight = req.get("weight", "high")
+        is_required = req.get("required", True)
+
+        # Check special case: Experience requirement
+        if req_cat == "Experience":
+            exp_match = re.search(r'(\d+)\+?', req_desc)
+            needed_exp = int(exp_match.group(1)) if exp_match else 3
+            if cand_exp >= needed_exp:
+                status = "MATCHED"
+                score = 100
+                justification = f"Candidate has ~{cand_exp} years of recorded experience, meeting or exceeding required {needed_exp}+ years."
+                snippet = f"Documented experience timeline indicates approximately {cand_exp} years in software engineering."
+                sec = "Experience"
+                line_no = 10
+            elif cand_exp >= max(1, needed_exp - 1):
+                status = "PARTIAL_MATCH"
+                score = 70
+                justification = f"Candidate possesses ~{cand_exp} years experience, slightly below the target {needed_exp}+ years."
+                snippet = f"Timeline shows ~{cand_exp} years of experience."
+                sec = "Experience"
+                line_no = 10
+            else:
+                status = "GAP_MISSING"
+                score = 35
+                justification = f"Candidate possesses ~{cand_exp} years experience, notably below required {needed_exp}+ years."
+                snippet = f"Current profile exhibits approximately {cand_exp} years total tenure."
+                sec = "Experience"
+                line_no = 10
+                if is_required:
+                    red_flags.append({
+                        "type": "Experience Deficit",
+                        "severity": "Medium",
+                        "description": f"Role specifies {needed_exp}+ years, candidate records ~{cand_exp} years.",
+                        "validation_question": f"Can you detail your overall career timeline and any unlisted or freelance experience contributing to the {needed_exp}+ year requirement?"
+                    })
+
+        else:
+            snippet, sec, line_no, token_match = _find_best_evidence_in_resume(req_desc, candidate_data)
+            
+            # Check skill catalog overlap
+            req_tokens = [w for w in re.findall(r'[a-zA-Z0-9_\+#\.]+', req_desc.lower()) if len(w) > 2]
+            overlap_skills = [s for s in cand_skills_lower if s in req_tokens or any(s in w for w in req_tokens)]
+            
+            if token_match >= 0.65 or (overlap_skills and token_match >= 0.4):
+                status = "MATCHED"
+                score = int(85 + token_match * 15)
+                score = min(100, score)
+                justification = f"Strong direct alignment found in {sec}. Candidate demonstrates practical application ({', '.join(overlap_skills) if overlap_skills else 'matched terms'})."
+            elif token_match >= 0.35 or overlap_skills:
+                status = "PARTIAL_MATCH"
+                score = int(50 + token_match * 30)
+                justification = f"Partial alignment. Mentioned in {sec} or listed in skills, but in-depth production scale evidence requires interview confirmation."
+                if not snippet and overlap_skills:
+                    snippet = f"Skills listed: {', '.join(overlap_skills).title()}."
+                    sec = "Skills"
+                    line_no = 15
+            elif any(w in cand_full_text for w in req_tokens[:3]):
+                status = "UNCLEAR"
+                score = 35
+                justification = "Keywords loosely touched upon in resume, but concrete context, ownership, or metrics are ambiguous."
+                red_flags.append({
+                    "type": "Ambiguous Qualification",
+                    "severity": "Low",
+                    "description": f"Requirement '{req_title}' has vague coverage in candidate documentation.",
+                    "validation_question": f"Could you walk through a specific project where you directly worked with {req_title}?"
+                })
+            else:
+                status = "GAP_MISSING"
+                score = 15
+                justification = f"No identifiable evidence or stack mention found for '{req_title}'."
+                if is_required:
+                    red_flags.append({
+                        "type": "Missing Core Skill",
+                        "severity": "High",
+                        "description": f"Critical must-have '{req_title}' is not mentioned in candidate profile.",
+                        "validation_question": f"Have you had hands-on exposure to {req_title}, or comparable alternative frameworks?"
+                    })
+
+        mappings.append({
+            "requirement_id": req_id,
+            "title": req_title,
+            "category": req_cat,
+            "required": is_required,
+            "status": status, # MATCHED, PARTIAL_MATCH, GAP_MISSING, UNCLEAR
+            "score": score,
+            "justification": justification,
+            "citation": {
+                "section": sec,
+                "line_number": line_no,
+                "snippet": snippet or "No direct textual citation located."
+            }
+        })
+        
+        weight_mult = 1.2 if weight == "high" else 0.8
+        total_score += score * weight_mult
+
+    # Check for skills listed with no experience mention
+    for sk in candidate_data.get("skills", [])[:8]:
+        sk_low = sk.lower()
+        exp_text = candidate_data.get("sections", {}).get("experience", "").lower()
+        proj_text = candidate_data.get("sections", {}).get("projects", "").lower()
+        if sk_low not in exp_text and sk_low not in proj_text:
+            red_flags.append({
+                "type": "Unverified Skill Claim",
+                "severity": "Low",
+                "description": f"Skill '{sk}' is claimed in the summary/skills list but not referenced in work history or projects.",
+                "validation_question": f"You noted proficiency in {sk} on your resume - can you give an example of how you used it in a past role or side project?"
+            })
+            break
+
+    # Calculate overall match %
+    max_score = sum((100 * (1.2 if r.get("weight") == "high" else 0.8)) for r in requirements) or 100
+    overall_match = min(100.0, round((total_score / max_score) * 100, 1))
+
+    return (mappings, overall_match, red_flags)
+
+def assign_candidate_tier(match_score: float) -> Tuple[str, str]:
+    """Returns (Tier Name, CSS color style)"""
+    if match_score >= 80:
+        return ("Tier 1: Strong Match", "emerald")
+    elif match_score >= 65:
+        return ("Tier 2: Strong Contender", "blue")
+    elif match_score >= 50:
+        return ("Tier 3: Potential Fit", "amber")
+    else:
+        return ("Tier 4: Substantial Gap", "rose")
+
+def assign_candidate_cohorts(candidate_data: Dict[str, Any]) -> Dict[str, str]:
+    exp = candidate_data.get("years_experience", 0)
+    skills = [s.lower() for s in candidate_data.get("skills", [])]
+    
+    # Seniority
+    if exp >= 8:
+        seniority = "Staff / Principal / Lead (8+ yrs)"
+    elif exp >= 5:
+        seniority = "Senior Engineer (5-7 yrs)"
+    elif exp >= 3:
+        seniority = "Mid-Level Engineer (3-4 yrs)"
+    else:
+        seniority = "Early Career / Junior (0-2 yrs)"
+
+    # Specialization
+    if any(s in skills for s in ["machine learning", "deep learning", "nlp", "llm", "pytorch", "tensorflow"]):
+        domain = "AI / ML & Data"
+    elif any(s in skills for s in ["docker", "kubernetes", "k8s", "terraform", "aws", "gcp", "azure"]):
+        domain = "Cloud & DevOps / Infrastructure"
+    elif any(s in skills for s in ["react", "vue", "angular", "tailwind", "next.js"]):
+        domain = "Frontend / Full-Stack"
+    else:
+        domain = "Backend & Systems"
+
+    return {
+        "seniority": seniority,
+        "domain": domain
+    }
+
+def generate_candidate_summary(candidate_data: Dict[str, Any], role_title: str, match_score: float, mappings: List[Dict[str, Any]]) -> str:
+    name = candidate_data.get("name", "Candidate")
+    exp = candidate_data.get("years_experience", 0)
+    skills = candidate_data.get("skills", [])
+    
+    matched_reqs = [m["title"] for m in mappings if m["status"] == "MATCHED"]
+    missing_reqs = [m["title"] for m in mappings if m["status"] in ["GAP_MISSING", "UNCLEAR"]]
+    
+    summary = f"**{name}** is a software professional with approximately **{exp} years** of experience. "
+    if match_score >= 80:
+        summary += f"They represent a **high-confidence match ({match_score}%)** for the **{role_title}** role. "
+    elif match_score >= 65:
+        summary += f"They are a **strong contender ({match_score}%)** with substantial overlap for **{role_title}**, with a few targeted areas needing validation. "
+    else:
+        summary += f"Overall alignment is currently scored at **{match_score}%**, presenting noticeable capability gaps for the **{role_title}** specification. "
+
+    if matched_reqs:
+        summary += f"Core strengths include verified background in: {', '.join(matched_reqs[:3])}. "
+    if skills:
+        summary += f"Notable technical proficiencies: {', '.join(skills[:6])}. "
+    if missing_reqs:
+        summary += f"Key areas for interview inquiry: {', '.join(missing_reqs[:2])}."
+        
+    return summary
+
+def generate_role_interview_kit(candidate_data: Dict[str, Any], role_data: Dict[str, Any], mappings: List[Dict[str, Any]], red_flags: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Generates structured role-specific interview questions tailored to candidate background."""
+    questions = []
+    q_id = 1
+
+    skills = candidate_data.get("skills", [])
+    name = candidate_data.get("name", "The candidate")
+
+    # 1. Technical Competency Questions (probing strengths)
+    matched = [m for m in mappings if m["status"] == "MATCHED"]
+    if matched:
+        top_m = matched[0]
+        questions.append({
+            "id": f"q-{q_id}",
+            "category": "Technical Competency",
+            "competency": top_m["title"],
+            "question": f"Can you detail a complex technical challenge you faced when implementing {top_m['title']}? What design tradeoffs did you weigh?",
+            "resume_context": f"Matched from candidate's resume: {top_m['citation']['snippet'][:120]}...",
+            "evaluation_criteria": {
+                "strong_signal": "Discusses concrete architectures, bottleneck analysis, graceful degradation, and production metrics.",
+                "red_flag": "Stays on surface-level tutorial explanations without real-world operational context."
+            }
+        })
+        q_id += 1
+
+    # 2. System Design / Architecture Questions
+    proj_sec = candidate_data.get("sections", {}).get("projects", "")
+    exp_sec = candidate_data.get("sections", {}).get("experience", "")
+    sample_proj = "the distributed service or primary platform"
+    if proj_sec:
+        first_proj_line = [l for l in proj_sec.splitlines() if len(l) > 15]
+        if first_proj_line:
+            sample_proj = first_proj_line[0][:70]
+
+    questions.append({
+        "id": f"q-{q_id}",
+        "category": "Architecture & Production Scale",
+        "competency": "System Design & Resilience",
+        "question": f"In your work on {sample_proj}, how did you handle data consistency, failure isolation, and performance under peak load?",
+        "resume_context": f"Anchored on candidate project/experience record.",
+        "evaluation_criteria": {
+            "strong_signal": "Articulates clear scaling boundaries, caching strategies, rate limiting, and observability.",
+            "red_flag": "Ignores failure modes, assumes networks and downstream dependencies never timeout."
+        }
+    })
+    q_id += 1
+
+    # 3. Gap Validation Questions (Probing missing/unclear skills)
+    gaps = [m for m in mappings if m["status"] in ["GAP_MISSING", "UNCLEAR"]]
+    if gaps:
+        gap = gaps[0]
+        questions.append({
+            "id": f"q-{q_id}",
+            "category": "Gap Validation",
+            "competency": gap["title"],
+            "question": f"The position heavily relies on {gap['title']}, which wasn't prominently highlighted in your profile. Have you applied this or an equivalent paradigm?",
+            "resume_context": f"Requirement marked as {gap['status']}: '{gap['title']}'.",
+            "evaluation_criteria": {
+                "strong_signal": "Demonstrates rapid learning aptitude or solid transferable knowledge from related technologies.",
+                "red_flag": "Bluffs familiarity or reveals a rigid reluctance to adopt unfamiliar toolchains."
+            }
+        })
+        q_id += 1
+
+    # 4. Flags Validation Questions
+    for flag in red_flags[:1]:
+        questions.append({
+            "id": f"q-{q_id}",
+            "category": "Audit & Resume Verification",
+            "competency": flag["type"],
+            "question": flag["validation_question"],
+            "resume_context": f"Flagged by screening engine: {flag['description']}",
+            "evaluation_criteria": {
+                "strong_signal": "Provides candid, coherent context with verifiable outcomes.",
+                "red_flag": "Evasive or contradicts details stated on the resume."
+            }
+        })
+        q_id += 1
+
+    # 5. Behavioral & Collaboration Question
+    questions.append({
+        "id": f"q-{q_id}",
+        "category": "Behavioral & Leadership",
+        "competency": "Technical Disagreements & Delivery",
+        "question": "Describe a situation where you strongly disagreed with a peer or product manager regarding an engineering decision. How did you resolve it?",
+        "resume_context": "Evaluates teamwork, ownership, and constructive conflict resolution.",
+        "evaluation_criteria": {
+            "strong_signal": "Focuses on data, user impact, pragmatic compromise, and committing fully to team decisions.",
+            "red_flag": "Blames others, shows inflexibility, or passively disengages."
+        }
+    })
+
+    return questions
+
+def generate_dynamic_follow_up(question: str, candidate_answer: str, focus_area: str = "depth") -> List[Dict[str, str]]:
+    """Generates focused follow-up questions when an interviewer wants to drill deeper into an answer."""
+    answer_clean = candidate_answer.strip()
+    words_count = len(answer_clean.split())
+    
+    follow_ups = []
+
+    if focus_area == "individual_contribution" or "we" in answer_clean.lower() and "i " not in answer_clean.lower():
+        follow_ups.append({
+            "prompt": "You mentioned what the team delivered - what was specifically your individual architecture decision or lines of code?",
+            "rationale": "Clarifies individual ownership vs team accomplishments."
+        })
+        follow_ups.append({
+            "prompt": "If you were to rebuild that specific module alone tomorrow, what would you implement differently?",
+            "rationale": "Validates personal technical depth."
+        })
+
+    elif focus_area == "scale_failure" or any(w in answer_clean.lower() for w in ["kafka", "database", "api", "microservice", "service", "scale"]):
+        follow_ups.append({
+            "prompt": "What happened when that service experienced unexpected latency or a network partition? How was alerting and recovery configured?",
+            "rationale": "Exposes whether the candidate tested production failure modes."
+        })
+        follow_ups.append({
+            "prompt": "What exact metrics or telemetry did you monitor to confirm that performance did not degrade?",
+            "rationale": "Verifies quantitative engineering rigor."
+        })
+
+    else: # default depth probe
+        if words_count < 25:
+            follow_ups.append({
+                "prompt": "Could you walk through a concrete step-by-step example from start to finish?",
+                "rationale": "The initial answer was concise and requires deeper substance."
+            })
+        follow_ups.append({
+            "prompt": "What were the major technical tradeoffs you considered before settling on this solution?",
+            "rationale": "Probes architectural maturity and critical thinking."
+        })
+        follow_ups.append({
+            "prompt": "What was the most difficult edge case or bug encountered during rollout, and how did you debug it?",
+            "rationale": "Validates hands-on troubleshooting and resilience."
+        })
+
+    return follow_ups
+
+def evaluate_interview_notes(interview_notes: str, role_requirements: List[Dict[str, Any]], candidate_data: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Summarizes interview notes, maps verified evidence to job requirements,
+    detects unanswered areas, and outputs a standardized evaluation report.
+    """
+    notes_lower = interview_notes.lower()
+    
+    req_evidence = []
+    unanswered_requirements = []
+    
+    confirmed_count = 0
+    total_reqs = len(role_requirements)
+
+    for req in role_requirements:
+        req_title = req.get("title", "")
+        req_desc = req.get("description", "")
+        
+        # Token overlap check in interview notes
+        tokens = [w for w in re.findall(r'[a-zA-Z0-9_\+#\.]+', (req_title + " " + req_desc).lower()) if len(w) > 3]
+        matches = [t for t in tokens if t in notes_lower]
+        
+        # Check sentiment/evidence keywords near the topic
+        if matches:
+            # Look for positive or negative indicators
+            pos_words = ["good", "strong", "solid", "excellent", "deep", "impressed", "yes", "confirmed", "clear", "solved"]
+            neg_words = ["weak", "struggled", "failed", "unclear", "no", "missed", "shallow", "hesitant"]
+            
+            has_pos = any(pw in notes_lower for pw in pos_words)
+            has_neg = any(nw in notes_lower for nw in neg_words)
+
+            if has_neg and not has_pos:
+                status = "EVIDENCE_CONCERN"
+                score = 30
+                evidence_note = f"Topic was covered during interview; notes express concern or limited depth on {req_title}."
+            else:
+                status = "EVIDENCE_CONFIRMED"
+                score = 85
+                confirmed_count += 1
+                evidence_note = f"Observed positive validation in notes concerning {req_title}."
+                
+            req_evidence.append({
+                "requirement_id": req.get("id"),
+                "requirement_title": req_title,
+                "status": status,
+                "evidence": evidence_note
+            })
+        else:
+            unanswered_requirements.append({
+                "requirement_id": req.get("id"),
+                "requirement_title": req_title,
+                "suggested_question": f"In a follow-up round or reference check, explicitly probe: '{req_title}'."
+            })
+
+    # Dimension Scores
+    tech_score = 75
+    prob_score = 70
+    comm_score = 80
+    role_fit = 75
+
+    if "strong" in notes_lower or "excellent" in notes_lower:
+        tech_score += 15
+        prob_score += 10
+    if "struggled" in notes_lower or "weak" in notes_lower:
+        tech_score -= 20
+        prob_score -= 15
+    if "clear" in notes_lower or "articulate" in notes_lower:
+        comm_score += 15
+    if "rambled" in notes_lower or "vague" in notes_lower:
+        comm_score -= 20
+
+    tech_score = max(20, min(95, tech_score))
+    prob_score = max(20, min(95, prob_score))
+    comm_score = max(20, min(95, comm_score))
+    role_fit = max(20, min(95, int((confirmed_count / max(1, total_reqs)) * 100)))
+
+    overall_avg = (tech_score + prob_score + comm_score + role_fit) / 4.0
+
+    if overall_avg >= 82 and len(unanswered_requirements) <= 2:
+        recommendation = "STRONG HIRE"
+        rec_color = "emerald"
+    elif overall_avg >= 70:
+        recommendation = "HIRE"
+        rec_color = "blue"
+    elif overall_avg >= 55:
+        recommendation = "LEAN NO"
+        rec_color = "amber"
+    else:
+        recommendation = "STRONG NO"
+        rec_color = "rose"
+
+    executive_summary = (
+        f"The candidate was evaluated across technical depth, problem-solving, and role-specific competencies. "
+        f"Interview notes demonstrated positive validation for {confirmed_count} out of {total_reqs} core requirements. "
+        f"{'Communication and architectural grounding were evident.' if comm_score >= 70 else 'Communication or clarity of thought required frequent prompting.'} "
+        f"Overall scoring yields a **{recommendation}** recommendation."
+    )
+
+    return {
+        "recommendation": recommendation,
+        "recommendation_color": rec_color,
+        "overall_score": round(overall_avg, 1),
+        "dimension_scores": {
+            "technical_competency": tech_score,
+            "problem_solving": prob_score,
+            "communication": comm_score,
+            "role_fit": role_fit
+        },
+        "executive_summary": executive_summary,
+        "requirement_evidence": req_evidence,
+        "unanswered_areas": unanswered_requirements,
+        "notes_summary": interview_notes[:350] + ("..." if len(interview_notes) > 350 else "")
+    }
+
+def query_candidate_pool(query: str, candidates: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Conversational natural language query over candidate pool."""
+    tokens = [w.lower() for w in re.findall(r'[a-zA-Z0-9_\+#\.]+', query) if len(w) > 1]
+    stopwords = {"who", "has", "find", "show", "me", "the", "a", "an", "with", "and", "or", "in", "at", "for", "candidates", "candidate"}
+    search_terms = [t for t in tokens if t not in stopwords]
+
+    # Check for experience constraint (e.g. 5 years, 3+ yrs)
+    exp_filter = 0
+    exp_match = re.search(r'(\d+)\+?\s*(?:years|yrs)', query.lower())
+    if exp_match:
+        exp_filter = int(exp_match.group(1))
+
+    scored_results = []
+    for cand in candidates:
+        cand_text = cand.get("raw_text", "").lower()
+        cand_skills = [s.lower() for s in cand.get("skills", [])]
+        cand_exp = cand.get("years_experience", 0)
+
+        match_count = 0
+        highlights = []
+
+        for term in search_terms:
+            if term in cand_skills:
+                match_count += 2
+                highlights.append(f"Direct skill proficiency: **{term.upper()}**")
+            elif term in cand_text:
+                match_count += 1
+                # Grab a snippet
+                idx = cand_text.find(term)
+                start = max(0, idx - 40)
+                end = min(len(cand_text), idx + 60)
+                snippet = cand.get("raw_text", "")[start:end].replace("\n", " ").strip()
+                highlights.append(f"...{snippet}...")
+
+        # Experience check bonus/penalty
+        if exp_filter > 0:
+            if cand_exp >= exp_filter:
+                match_count += 2
+                highlights.append(f"Meets tenure criterion ({cand_exp} yrs >= {exp_filter} yrs)")
+            else:
+                match_count -= 1
+
+        if match_count > 0 or not search_terms:
+            score = round(min(100.0, (match_count / max(1, len(search_terms) * 2)) * 100), 1)
+            scored_results.append({
+                "candidate": cand,
+                "relevance_score": score,
+                "highlights": list(dict.fromkeys(highlights))[:3],
+                "matched_reason": f"Matched {match_count} key terms in candidate profile and skills catalog."
+            })
+
+    scored_results.sort(key=lambda x: x["relevance_score"], reverse=True)
+    return scored_results
