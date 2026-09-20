@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HireFlow | AI Candidate Screening & Interview Intelligence Agent</title>
+  
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#eef2ff',
+              100: '#e0e7ff',
+              500: '#6366f1',
+              600: '#4f46e5',
+              700: '#4338ca',
+            }
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <!-- Custom CSS -->
+  <link rel="stylesheet" href="/css/custom.css">
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col selection:bg-indigo-500 selection:text-white">
+
+  <!-- Top Navigation Header -->
+  <nav id="app-navbar" class="sticky top-0 z-40 bg-slate-950/80 backdrop-blur-md border-b border-slate-800/80"></nav>
+
+  <!-- Main App Shell -->
+  <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
+    <div id="candidates-view-container"></div>
+  </main>
+
+  <!-- Footer -->
+  <footer class="border-t border-slate-900 bg-slate-950 py-4 text-center text-xs text-slate-500">
+    <div class="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
+      <div class="flex items-center space-x-2">
+        <span class="font-bold text-slate-400">HireFlow Intelligence Agent</span>
+        <span>•</span>
+        <span>Empowering human hiring teams with explainable AI screening & interview co-piloting</span>
+      </div>
+      <div class="flex items-center space-x-3 text-slate-500 font-mono text-[11px]">
+        <span>Explainable Citations</span>
+        <span>•</span>
+        <span>Gemini 3.8 Flash & Local NLP</span>
+      </div>
+    </div>
+  </footer>
+
+  <!-- ==================== MODALS ==================== -->
+
+  <!-- Candidate Deep-Dive & Audit Inspector Modal -->
+  <div id="candidate-modal" class="hidden fixed inset-0 z-50 overflow-y-auto modal-backdrop flex items-center justify-center p-3 sm:p-6">
+    <div class="relative w-full max-w-5xl bg-slate-950 rounded-2xl border border-slate-800 shadow-2xl overflow-hidden my-8" id="candidate-modal-content">
+      <!-- Injected by CandidateModal.js -->
+    </div>
+  </div>
+
+  <!-- Live Interview Intelligence Studio Modal -->
+  <div id="interview-modal" class="hidden fixed inset-0 z-50 overflow-y-auto modal-backdrop flex items-center justify-center p-3 sm:p-6">
+    <div class="relative w-full max-w-6xl bg-slate-950 rounded-2xl border border-slate-800 shadow-2xl overflow-hidden my-6" id="interview-modal-content">
+      <!-- Injected by InterviewStudio.js -->
+    </div>
+  </div>
+
+  <!-- Create Role Modal -->
+  <div id="role-modal" class="hidden fixed inset-0 z-50 overflow-y-auto modal-backdrop flex items-center justify-center p-4">
+    <div class="relative w-full max-w-2xl bg-slate-900 rounded-2xl border border-slate-800 shadow-2xl overflow-hidden">
+      <div class="p-6 border-b border-slate-800 flex items-center justify-between">
+        <div class="flex items-center space-x-2.5">
+          <div class="w-8 h-8 rounded-lg bg-indigo-500/20 text-indigo-400 flex items-center justify-center">
+            <i data-lucide="briefcase" class="w-4 h-4"></i>
+          </div>
+          <h3 class="text-lg font-bold text-white">Create New Job Role</h3>
+        </div>
+        <button onclick="RolesView.closeCreateRoleModal()" class="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <form id="new-role-form" class="p-6 space-y-4">
+        <div>
+          <label class="text-xs font-semibold text-slate-300 block mb-1">Quick Role Templates (Click to fill):</label>
+          <div id="role-templates-container" class="grid grid-cols-1 sm:grid-cols-3 gap-2"></div>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div class="sm:col-span-2">
+            <label class="text-xs font-semibold text-slate-300 block mb-1">Role Title *</label>
+            <input type="text" id="new-role-title" required placeholder="e.g. Senior Backend Engineer" class="w-full bg-slate-950 text-slate-200 text-xs rounded-xl p-2.5 border border-slate-700 focus:outline-none focus:ring-1 focus:ring-indigo-500" />
+          </div>
+          <div>
+            <label class="text-xs font-semibold text-slate-300 block mb-1">Min. Exp (Years)</label>
+            <input type="number" id="new-role-exp" min="0" max="25" value="3" class="w-full bg-slate-950 text-slate-200 text-xs rounded-xl p-2.5 border border-slate-700 focus:outline-none focus:ring-1 focus:ring-indigo-500" />
+          </div>
+        </div>
+
+        <div>
+          <label class="text-xs font-semibold text-slate-300 block mb-1">Department / Team</label>
+          <input type="text" id="new-role-dept" value="Engineering" class="w-full bg-slate-950 text-slate-200 text-xs rounded-xl p-2.5 border border-slate-700 focus:outline-none focus:ring-1 focus:ring-indigo-500" />
+        </div>
+
+        <div>
+          <label class="text-xs font-semibold text-slate-300 block mb-1">Job Description & Requirements *</label>
+          <p class="text-[11px] text-slate-400 mb-1">Paste your job description. The AI will automatically extract must-have skills, preferred requirements, and evaluation rubrics.</p>
+          <textarea id="new-role-jd" required rows="7" placeholder="Paste full job description here..." class="w-full bg-slate-950 text-slate-200 text-xs font-mono rounded-xl p-3 border border-slate-700 focus:outline-none focus:ring-1 focus:ring-indigo-500"></textarea>
+        </div>
+
+        <div class="pt-3 border-t border-slate-800 flex items-center justify-end space-x-3">
+          <button type="button" onclick="RolesView.closeCreateRoleModal()" class="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition">
+            Cancel
+          </button>
+          <button type="submit" id="btn-submit-role" class="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-lg shadow-indigo-500/30 transition">
+            Extract & Create Role
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Audit Trail Modal -->
+  <div id="audit-modal" class="hidden fixed inset-0 z-50 overflow-y-auto modal-backdrop flex items-center justify-center p-4">
+    <div class="relative w-full max-w-3xl bg-slate-950 rounded-2xl border border-slate-800 shadow-2xl overflow-hidden my-6">
+      <div class="p-5 border-b border-slate-800 flex items-center justify-between">
+        <div class="flex items-center space-x-2.5">
+          <div class="w-8 h-8 rounded-lg bg-indigo-500/20 text-indigo-400 flex items-center justify-center">
+            <i data-lucide="history" class="w-4 h-4"></i>
+          </div>
+          <div>
+            <h3 class="text-base font-bold text-white">System Audit Trail</h3>
+            <p class="text-[11px] text-slate-400">Verifiable chronological audit log of candidate screening actions</p>
+          </div>
+        </div>
+        <button onclick="document.getElementById('audit-modal').classList.add('hidden')" class="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <div class="p-5 overflow-y-auto max-h-[70vh]">
+        <div id="audit-log-list" class="space-y-2"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Settings Modal -->
+  <div id="settings-modal" class="hidden fixed inset-0 z-50 overflow-y-auto modal-backdrop flex items-center justify-center p-4">
+    <div class="relative w-full max-w-lg bg-slate-900 rounded-2xl border border-slate-800 shadow-2xl overflow-hidden">
+      <div class="p-5 border-b border-slate-800 flex items-center justify-between">
+        <div class="flex items-center space-x-2.5">
+          <div class="w-8 h-8 rounded-lg bg-indigo-500/20 text-indigo-400 flex items-center justify-center">
+            <i data-lucide="settings" class="w-4 h-4"></i>
+          </div>
+          <div>
+            <h3 class="text-base font-bold text-white">AI Engine Configuration</h3>
+            <p class="text-[11px] text-slate-400">Manage Gemini API Key & screening options</p>
+          </div>
+        </div>
+        <button onclick="SettingsModal.close()" class="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <form id="settings-form" class="p-5 space-y-4">
+        <div id="settings-key-status" class="text-xs p-3 rounded-xl bg-slate-950 border border-slate-800"></div>
+
+        <div>
+          <label class="text-xs font-semibold text-slate-300 block mb-1">Google Gemini API Key (Optional)</label>
+          <input type="password" id="settings-gemini-key" placeholder="AIzaSy..." class="w-full bg-slate-950 text-slate-200 text-xs rounded-xl p-2.5 border border-slate-700 focus:outline-none focus:ring-1 focus:ring-indigo-500 font-mono" />
+          <p class="text-[11px] text-slate-500 mt-1">If blank, HireFlow uses its built-in High-Precision Heuristic NLP screening engine.</p>
+        </div>
+
+        <div>
+          <label class="text-xs font-semibold text-slate-300 block mb-1">Model Selection</label>
+          <select id="settings-model" class="w-full bg-slate-950 text-slate-200 text-xs rounded-xl p-2.5 border border-slate-700 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+            <option value="gemini-3.8-flash">gemini-3.8-flash (Recommended - Fast & Accurate)</option>
+            <option value="gemini-flash-latest">gemini-flash-latest</option>
+            <option value="gemini-3.1-pro-preview">gemini-3.1-pro-preview (Deep Reasoning)</option>
+          </select>
+        </div>
+
+        <div>
+          <label class="text-xs font-semibold text-slate-300 block mb-1">Execution Mode</label>
+          <select id="settings-mode" class="w-full bg-slate-950 text-slate-200 text-xs rounded-xl p-2.5 border border-slate-700 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+            <option value="auto">Auto (Use Gemini when key exists, else Embedded NLP)</option>
+            <option value="nlp_only">Embedded NLP Engine Only (Offline / Zero-latency)</option>
+            <option value="gemini_only">Gemini LLM Only</option>
+          </select>
+        </div>
+
+        <div class="pt-3 border-t border-slate-800 flex items-center justify-end space-x-3">
+          <button type="button" onclick="SettingsModal.close()" class="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition">
+            Close
+          </button>
+          <button type="submit" id="btn-save-settings" class="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow transition">
+            Save Settings
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Scripts -->
+  <script src="/js/api.js"></script>
+  <script src="/js/state.js"></script>
+  <script src="/js/components/navbar.js"></script>
+  <script src="/js/components/roles_view.js"></script>
+  <script src="/js/components/candidates_view.js"></script>
+  <script src="/js/components/candidate_modal.js"></script>
+  <script src="/js/components/interview_studio.js"></script>
+  <script src="/js/components/settings_modal.js"></script>
+  <script src="/js/app.js"></script>
+</body>
+</html>
