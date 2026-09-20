@@ -1,0 +1,144 @@
+import json
+import os
+import threading
+from typing import Dict, Any, List, Optional
+from backend.config import DB_PATH, SETTINGS_PATH
+
+_db_lock = threading.Lock()
+
+def _get_initial_db() -> Dict[str, Any]:
+    return {
+        "roles": {},
+        "candidates": {},
+        "interviews": {},
+        "audit_logs": []
+    }
+
+def load_db() -> Dict[str, Any]:
+    with _db_lock:
+        if not DB_PATH.exists():
+            initial = _get_initial_db()
+            save_db_internal(initial)
+            return initial
+        try:
+            with open(DB_PATH, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                for key in ["roles", "candidates", "interviews", "audit_logs"]:
+                    if key not in data:
+                        data[key] = [] if key == "audit_logs" else {}
+                return data
+        except Exception as e:
+            print(f"Warning: could not read DB ({e}), initializing fresh state.")
+            return _get_initial_db()
+
+def save_db_internal(data: Dict[str, Any]):
+    temp_path = DB_PATH.with_suffix(".tmp")
+    with open(temp_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+    if temp_path.exists():
+        temp_path.replace(DB_PATH)
+
+def save_db(data: Dict[str, Any]):
+    with _db_lock:
+        save_db_internal(data)
+
+def load_settings() -> Dict[str, Any]:
+    default_settings = {
+        "gemini_api_key": os.getenv("GEMINI_API_KEY", ""),
+        "model_name": "gemini-3.8-flash",
+        "temperature": 0.2,
+        "mode": "auto" # 'auto', 'gemini_only', 'nlp_only'
+    }
+    if not SETTINGS_PATH.exists():
+        return default_settings
+    try:
+        with open(SETTINGS_PATH, "r", encoding="utf-8") as f:
+            saved = json.load(f)
+            default_settings.update(saved)
+            return default_settings
+    except Exception:
+        return default_settings
+
+def save_settings(settings: Dict[str, Any]):
+    with open(SETTINGS_PATH, "w", encoding="utf-8") as f:
+        json.dump(settings, f, indent=2)
+
+# Role Helpers
+def get_all_roles() -> List[Dict[str, Any]]:
+    db = load_db()
+    roles = list(db["roles"].values())
+    roles.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+    return roles
+
+def get_role_by_id(role_id: str) -> Optional[Dict[str, Any]]:
+    db = load_db()
+    return db["roles"].get(role_id)
+
+def upsert_role(role_data: Dict[str, Any]):
+    db = load_db()
+    db["roles"][role_data["id"]] = role_data
+    save_db(db)
+
+def delete_role(role_id: str) -> bool:
+    db = load_db()
+    if role_id in db["roles"]:
+        del db["roles"][role_id]
+        # delete candidates for this role
+        cand_keys = [k for k, v in db["candidates"].items() if v.get("role_id") == role_id]
+        for k in cand_keys:
+            del db["candidates"][k]
+            if k in db["interviews"]:
+                del db["interviews"][k]
+        save_db(db)
+        return True
+    return False
+
+# Candidate Helpers
+def get_candidates_by_role(role_id: str) -> List[Dict[str, Any]]:
+    db = load_db()
+    cands = [v for v in db["candidates"].values() if v.get("role_id") == role_id]
+    cands.sort(key=lambda x: x.get("match_score", 0), reverse=True)
+    return cands
+
+def get_candidate_by_id(candidate_id: str) -> Optional[Dict[str, Any]]:
+    db = load_db()
+    return db["candidates"].get(candidate_id)
+
+def upsert_candidate(candidate_data: Dict[str, Any]):
+    db = load_db()
+    db["candidates"][candidate_data["id"]] = candidate_data
+    save_db(db)
+
+def delete_candidate(candidate_id: str) -> bool:
+    db = load_db()
+    if candidate_id in db["candidates"]:
+        del db["candidates"][candidate_id]
+        if candidate_id in db["interviews"]:
+            del db["interviews"][candidate_id]
+        save_db(db)
+        return True
+    return False
+
+# Interview Helpers
+def get_interview(candidate_id: str) -> Optional[Dict[str, Any]]:
+    db = load_db()
+    return db["interviews"].get(candidate_id)
+
+def upsert_interview(interview_data: Dict[str, Any]):
+    db = load_db()
+    db["interviews"][interview_data["candidate_id"]] = interview_data
+    save_db(db)
+
+def record_audit(action: str, target_id: str, details: Dict[str, Any]):
+    import datetime
+    db = load_db()
+    log_entry = {
+        "timestamp": datetime.datetime.now().isoformat(),
+        "action": action,
+        "target_id": target_id,
+        "details": details
+    }
+    db["audit_logs"].append(log_entry)
+    if len(db["audit_logs"]) > 500:
+        db["audit_logs"] = db["audit_logs"][-500:]
+    save_db(db)
