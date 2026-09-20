@@ -1,0 +1,167 @@
+// Navbar Component
+const Navbar = {
+  init() {
+    this.render();
+    State.subscribe((event, payload) => {
+      if (['roles_updated', 'role_selected', 'candidates_updated'].includes(event)) {
+        this.updateRoleSelect();
+        this.updateStats();
+      }
+    });
+  },
+
+  render() {
+    const navEl = document.getElementById('app-navbar');
+    if (!navEl) return;
+
+    navEl.innerHTML = `
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div class="flex items-center justify-between h-16">
+          
+          <!-- Logo & Branding -->
+          <div class="flex items-center space-x-3">
+            <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 via-purple-600 to-pink-500 flex items-center justify-center shadow-lg shadow-indigo-500/30">
+              <i data-lucide="sparkles" class="w-5 h-5 text-white"></i>
+            </div>
+            <div>
+              <div class="flex items-center space-x-2">
+                <span class="text-xl font-black tracking-tight text-white">Hire<span class="text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-pink-400">Flow</span></span>
+                <span class="text-[10px] font-semibold tracking-wider uppercase px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">Intelligence Agent</span>
+              </div>
+              <p class="text-xs text-slate-400 hidden sm:block">AI Screening, Requirement Mapping & Interview Co-pilot</p>
+            </div>
+          </div>
+
+          <!-- Role Selector & Role Actions -->
+          <div class="flex items-center space-x-3">
+            <div class="flex items-center bg-slate-800/80 rounded-lg p-1 border border-slate-700/60">
+              <span class="text-xs text-slate-400 px-2 font-medium flex items-center space-x-1">
+                <i data-lucide="briefcase" class="w-3.5 h-3.5 text-indigo-400 inline"></i>
+                <span class="hidden md:inline">Role:</span>
+              </span>
+              <select id="role-select" class="bg-slate-900 text-slate-200 text-xs font-semibold rounded-md px-2.5 py-1.5 border border-slate-700 focus:outline-none focus:ring-1 focus:ring-indigo-500 max-w-[200px] md:max-w-[280px]">
+                <option value="">Loading roles...</option>
+              </select>
+            </div>
+
+            <button id="btn-new-role" class="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-sm transition">
+              <i data-lucide="plus-circle" class="w-4 h-4"></i>
+              <span class="hidden sm:inline">Add Role</span>
+            </button>
+
+            <!-- 1-Click Demo Showcase -->
+            <button id="btn-seed-demo" title="Seed realistic sample roles and candidates for immediate evaluation" class="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-500/30 text-xs font-medium transition">
+              <i data-lucide="wand-2" class="w-4 h-4 text-amber-400"></i>
+              <span class="hidden lg:inline">Load Demo Showcase</span>
+            </button>
+
+            <!-- Audit Trail Button -->
+            <button id="btn-audit-trail" title="View chronological AI audit trail" class="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700/60 transition">
+              <i data-lucide="history" class="w-4 h-4"></i>
+            </button>
+
+            <!-- Settings -->
+            <button id="btn-settings" title="API Keys & Settings" class="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700/60 transition">
+              <i data-lucide="settings" class="w-4 h-4"></i>
+            </button>
+          </div>
+
+        </div>
+      </div>
+    `;
+
+    lucide.createIcons();
+
+    // Event handlers
+    const roleSelect = document.getElementById('role-select');
+    roleSelect.addEventListener('change', (e) => {
+      const selectedId = e.target.value;
+      const role = State.roles.find(r => r.id === selectedId);
+      if (role) {
+        State.setCurrentRole(role);
+      }
+    });
+
+    document.getElementById('btn-new-role').addEventListener('click', () => {
+      RolesView.openCreateRoleModal();
+    });
+
+    document.getElementById('btn-seed-demo').addEventListener('click', async () => {
+      const btn = document.getElementById('btn-seed-demo');
+      const origHtml = btn.innerHTML;
+      btn.innerHTML = `<i data-lucide="loader-2" class="w-4 h-4 animate-spin text-amber-400"></i><span class="hidden lg:inline">Seeding...</span>`;
+      try {
+        await API.seedDemo();
+        const roles = await API.getRoles();
+        State.setRoles(roles);
+        if (State.currentRole) {
+          const cands = await API.getRoleCandidates(State.currentRole.id);
+          State.setCandidates(cands);
+        }
+        alert("Demo showcase data loaded successfully!");
+      } catch (err) {
+        alert("Failed to seed demo data: " + err.message);
+      } finally {
+        btn.innerHTML = origHtml;
+        lucide.createIcons();
+      }
+    });
+
+    document.getElementById('btn-audit-trail').addEventListener('click', () => {
+      Navbar.openAuditTrailModal();
+    });
+
+    document.getElementById('btn-settings').addEventListener('click', () => {
+      SettingsModal.open();
+    });
+  },
+
+  updateRoleSelect() {
+    const roleSelect = document.getElementById('role-select');
+    if (!roleSelect) return;
+
+    if (State.roles.length === 0) {
+      roleSelect.innerHTML = `<option value="">No roles available</option>`;
+      return;
+    }
+
+    roleSelect.innerHTML = State.roles.map(r => `
+      <option value="${r.id}" ${State.currentRole && State.currentRole.id === r.id ? 'selected' : ''}>
+        ${r.title} (${r.candidate_count || 0} candidates)
+      </option>
+    `).join('');
+  },
+
+  updateStats() {
+    // optional bar update if present
+  },
+
+  async openAuditTrailModal() {
+    try {
+      const logs = await API.getAuditTrail();
+      const modal = document.getElementById('audit-modal');
+      const listEl = document.getElementById('audit-log-list');
+      if (!modal || !listEl) return;
+
+      listEl.innerHTML = logs.map(l => {
+        const time = new Date(l.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        return `
+          <div class="p-3 bg-slate-900/80 rounded-lg border border-slate-800 text-xs flex items-start justify-between space-x-3">
+            <div>
+              <div class="flex items-center space-x-2">
+                <span class="font-mono text-[10px] text-slate-500">${time}</span>
+                <span class="px-2 py-0.5 rounded font-mono text-[11px] bg-indigo-500/20 text-indigo-300 font-semibold">${l.action}</span>
+                <span class="text-slate-400 font-mono text-[11px]">${l.target_id}</span>
+              </div>
+              <pre class="mt-1.5 text-slate-300 font-mono text-[11px] overflow-x-auto p-1.5 bg-slate-950/70 rounded border border-slate-800/80">${JSON.stringify(l.details, null, 2)}</pre>
+            </div>
+          </div>
+        `;
+      }).join('') || `<p class="text-slate-400 text-sm text-center py-6">No audit activity recorded yet.</p>`;
+
+      modal.classList.remove('hidden');
+    } catch (e) {
+      alert("Could not load audit trail: " + e.message);
+    }
+  }
+};
