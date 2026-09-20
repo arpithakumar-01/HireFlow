@@ -1,0 +1,232 @@
+import datetime
+import uuid
+from typing import Dict, Any
+from backend.parsers.jd_parser import parse_job_description
+from backend.parsers.resume_parser import parse_resume
+from backend.intelligence.hybrid_ai import process_candidate_screening
+from backend.storage import upsert_role, upsert_candidate, upsert_interview, record_audit
+
+SAMPLE_JD_DISTRIBUTED = """Role Title: Staff Distributed Systems Engineer
+Department: Core Infrastructure & Cloud Platforms
+Experience: 6+ years
+
+About the Role:
+We are looking for an experienced Staff Distributed Systems Engineer to lead the architecture, resilience, and scaling of our multi-region data platform handling over 500,000 requests per second.
+
+Key Responsibilities:
+- Architect, build, and maintain high-throughput distributed microservices using Go, Python, and gRPC.
+- Lead multi-cluster Kubernetes deployments and manage cloud-native infrastructure on AWS or GCP.
+- Design resilient event-driven data streaming pipelines using Apache Kafka and Redis.
+- Ensure high availability, 99.99% uptime, fault tolerance, and automated disaster recovery.
+- Mentor senior engineering colleagues, conduct design reviews, and establish operational excellence standards.
+
+Must-Have Requirements:
+- At least 6+ years of production backend software engineering experience.
+- Deep expertise in Go (Golang) or Python for high-concurrency distributed systems.
+- Hands-on mastery of Kubernetes (K8s), Docker, and AWS cloud services (EKS, RDS, S3, IAM).
+- Proven track record designing event-driven systems using Apache Kafka, RabbitMQ, or AWS Kinesis.
+- Strong proficiency with relational databases (PostgreSQL) and in-memory caches (Redis).
+- Demonstrated experience with observability stacks: Prometheus, Grafana, Distributed Tracing.
+
+Nice-to-Have Qualifications:
+- Experience executing zero-downtime database migrations on terabyte-scale datasets.
+- Knowledge of Infrastructure-as-Code using Terraform and GitOps practices (ArgoCD).
+- Background in financial technology, payment processing, or compliance environments.
+"""
+
+SAMPLE_RESUME_ELENA = """Elena Rostova
+San Francisco, CA | elena.rostova@cloudscale-eng.io | (415) 892-4412 | github.com/erostova | linkedin.com/in/elena-rostova
+
+PROFESSIONAL SUMMARY
+Staff Software Engineer with 8+ years of dedicated experience architecting resilient distributed systems, real-time streaming architectures, and multi-region Kubernetes deployments. Led core platform engineering teams scaling backend pipelines from 50k to 650k RPS with 99.995% availability. Expert in Go, Python, AWS, and Kafka.
+
+CORE TECHNICAL SKILLS
+Languages: Go (Golang), Python, Bash, SQL, C++
+Cloud & Infrastructure: AWS (EKS, EC2, RDS, DynamoDB, S3), Kubernetes (K8s), Docker, Terraform, Helm
+Streaming & Data: Apache Kafka, Redis, PostgreSQL, RabbitMQ, Elasticsearch
+Observability & DevOps: Prometheus, Grafana, OpenTelemetry, CI/CD, GitHub Actions
+
+PROFESSIONAL EXPERIENCE
+
+Staff Infrastructure Engineer | Nexus Cloud Systems | 2021 - Present
+- Architected and deployed a global multi-cluster Kubernetes (EKS) infrastructure handling 650,000 requests/sec across 3 AWS regions.
+- Re-engineered core transaction ingestion service from legacy monolithic API to event-driven Go microservices with Kafka, cutting p99 latency from 180ms to 24ms.
+- Spearheaded zero-downtime PostgreSQL migration of 14TB active ledger data with logical replication, zero data loss, and zero customer interruption.
+- Authored comprehensive Infrastructure as Code (Terraform) pipelines and GitOps workflows, accelerating team deployments by 70%.
+- Mentored 9 senior and mid-level engineers, established company-wide architecture review board and incident response runbooks.
+
+Senior Distributed Systems Engineer | Helios FinTech Platform | 2018 - 2021
+- Designed and built high-concurrency payment authorization engine in Go and Python processing $3.2B in monthly transaction volume.
+- Implemented distributed rate limiting, circuit breaker patterns, and multi-tiered Redis caching, preventing cascading outages during Black Friday traffic spikes.
+- Configured end-to-end observability using Prometheus and Grafana alerts, reducing mean-time-to-detection (MTTD) by 60%.
+- Maintained automated CI/CD pipelines and unit testing suites achieving 94% test coverage.
+
+Software Engineer | Datastream Analytics | 2016 - 2018
+- Developed REST and gRPC microservices in Python (FastAPI/Django) and PostgreSQL.
+- Optimized slow analytical SQL queries, improving batch ETL throughput by 3.5x.
+
+EDUCATION & CERTIFICATIONS
+- B.S. in Computer Science | University of California, Berkeley (2016)
+- Certified Kubernetes Administrator (CKA)
+- AWS Certified Solutions Architect - Professional
+"""
+
+SAMPLE_RESUME_MARCUS = """Marcus Chen
+Seattle, WA | marcus.chen@devmail.org | (206) 554-1920 | github.com/mchen-code
+
+PROFESSIONAL SUMMARY
+Backend Software Engineer with 4 years of experience specializing in Python microservices, FastAPI, relational database optimization, and cloud APIs. Passionate about clean code, test-driven development, and Docker containerization. Seeking to expand into large-scale distributed systems and Kubernetes infrastructure.
+
+TECHNICAL COMPETENCIES
+Languages: Python, JavaScript, TypeScript, SQL
+Frameworks: FastAPI, Django, Flask, Express, Node.js
+Databases & Cache: PostgreSQL, MySQL, Redis, MongoDB
+Tools & Cloud: Docker, AWS (EC2, S3), CI/CD, Git, GitHub Actions, Linux
+
+WORK EXPERIENCE
+
+Backend Software Engineer | StreamPeak Software | 2022 - Present
+- Developed modular RESTful microservices in Python (FastAPI) and PostgreSQL serving 45,000 active web users.
+- Integrated Redis caching layers for expensive database queries, decreasing average response time from 350ms to 65ms.
+- Built automated continuous integration pipelines with GitHub Actions, enforcing flake8 linting and pytest suites with 88% test coverage.
+- Managed containerized Docker services on AWS EC2 instances; assisted DevOps team with basic staging environment updates.
+
+Junior Software Developer | OmniDigital Solutions | 2020 - 2022
+- Maintained Django web backend and created internal administration dashboards for customer reporting.
+- Designed relational schemas and database migration scripts in PostgreSQL.
+- Collaborated with front-end React developers to specify API contracts and resolve authentication token issues.
+
+EDUCATION
+- B.S. in Software Engineering | University of Washington (2020)
+"""
+
+SAMPLE_RESUME_ARIA = """Aria Patel
+Austin, TX | aria.patel@frontend-studio.com | (512) 443-8891 | github.com/ariapatel
+
+PROFESSIONAL SUMMARY
+Full-Stack & Frontend Engineer with 4 years of experience building modern, accessible web applications in React, TypeScript, Tailwind CSS, and Node.js. Enthusiastic about design systems, responsive user interfaces, and seamless API integrations.
+
+CORE SKILLS
+Frontend: React, TypeScript, Next.js, Redux, Tailwind CSS, HTML5, CSS3
+Backend: Node.js, Express, REST APIs, GraphQL
+Databases: MongoDB, PostgreSQL (basic)
+Tools: Git, Vite, Webpack, Jest, Docker (familiar)
+
+WORK EXPERIENCE
+
+Full Stack Developer | PixelCraft Interactive | 2022 - Present
+- Developed client-facing analytics dashboards in React and TypeScript with Tailwind CSS for enterprise B2B customers.
+- Created supporting Node.js/Express API endpoints to deliver aggregated usage metrics.
+- Improved Core Web Vitals and Lighthouse scores from 62 to 94 across primary customer portal pages.
+
+UI/UX Engineer | AlphaWave Digital | 2020 - 2022
+- Built reusable React component libraries and design tokens compliant with WCAG 2.1 AA accessibility guidelines.
+- Collaborated with product designers to implement interactive prototypes and animation transitions.
+
+EDUCATION
+- B.A. in Digital Arts & Information Systems | University of Texas at Austin (2020)
+"""
+
+SAMPLE_RESUME_DEVON = """Devon Vance
+Denver, CO | devon.vance@analyticslab.net | (720) 332-9011
+
+SUMMARY
+Junior Data Analyst with 1.5 years experience querying data, building Tableau dashboards, and automating basic spreadsheet workflows using Python and SQL.
+
+SKILLS
+Data Analysis, SQL, Python (Pandas, Matplotlib), Tableau, Excel, Git
+
+EXPERIENCE
+Junior Data Analyst | Summit Health Analytics | 2023 - Present
+- Extracted reporting data using SQL queries from MySQL databases.
+- Automated weekly client billing reports using Python scripts and Pandas.
+- Maintained Tableau visualization dashboards for regional healthcare clinic directors.
+
+EDUCATION
+- B.S. in Business Information Systems | University of Colorado (2023)
+"""
+
+SAMPLE_INTERVIEW_ELENA = """Interview Round: Technical Deep-Dive & Architecture Bar Raiser
+Interviewer: Alex Mercer (VP Engineering)
+Candidate: Elena Rostova
+
+Notes:
+- Discussed the 650k RPS Kubernetes deployment at Nexus Cloud. Elena immediately broke down ingress traffic management, AWS Network Load Balancer tuning, and how they configured pod horizontal autoscaling based on custom Prometheus queue depth metrics.
+- Asked about their Kafka architecture: Highly articulate explanation of partition keys, consumer group rebalancing, and exactly how they mitigated data skew during traffic spikes.
+- Probed on zero-downtime database migration: Clear mastery of PostgreSQL replication slots, dual-writing techniques, and rollback criteria.
+- Communication was exceptionally structured, crisp, and humble. She openly discussed technical debt decisions made under tight deadlines and how they retroactively remediated them.
+- Only minor note: Did not get time to cover their specific experience with ArgoCD and GitOps rollbacks in depth during the 45-minute slot.
+
+Verdict: Outstanding senior candidate. Clear bar-raiser for the Staff Distributed Systems role.
+"""
+
+def seed_demo_data():
+    """Initializes rich demo roles, parsed candidates, match evaluations, and sample interviews."""
+    # 1. Create Role
+    role_id = "role-demo-distributed"
+    jd_parsed = parse_job_description(SAMPLE_JD_DISTRIBUTED, title="Staff Distributed Systems Engineer", department="Core Infrastructure & Cloud Platforms", min_exp=6)
+    
+    role_obj = {
+        "id": role_id,
+        "title": jd_parsed["title"],
+        "department": jd_parsed["department"],
+        "min_experience_years": jd_parsed["min_experience_years"],
+        "detected_skills": jd_parsed["detected_skills"],
+        "requirements": jd_parsed["requirements"],
+        "responsibilities": jd_parsed["responsibilities"],
+        "raw_text": SAMPLE_JD_DISTRIBUTED,
+        "created_at": datetime.datetime.now().isoformat()
+    }
+    upsert_role(role_obj)
+
+    # 2. Seed Candidates
+    candidates_raw = [
+        ("elena-rostova", SAMPLE_RESUME_ELENA, "Elena_Rostova_Resume.pdf"),
+        ("marcus-chen", SAMPLE_RESUME_MARCUS, "Marcus_Chen_Resume.docx"),
+        ("aria-patel", SAMPLE_RESUME_ARIA, "Aria_Patel_Resume.pdf"),
+        ("devon-vance", SAMPLE_RESUME_DEVON, "Devon_Vance_Resume.txt")
+    ]
+
+    for cand_slug, resume_text, filename in candidates_raw:
+        cand_id = f"cand-{cand_slug}"
+        parsed_cand = parse_resume(resume_text, filename=filename)
+        parsed_cand["id"] = cand_id
+        parsed_cand["role_id"] = role_id
+        parsed_cand["filename"] = filename
+        parsed_cand["uploaded_at"] = datetime.datetime.now().isoformat()
+
+        # Run AI/NLP screening evaluation
+        screening_res = process_candidate_screening(parsed_cand, role_obj)
+        parsed_cand.update(screening_res)
+
+        upsert_candidate(parsed_cand)
+        record_audit("SCREENING_EVALUATION", cand_id, {
+            "role_id": role_id,
+            "match_score": screening_res["match_score"],
+            "tier": screening_res["tier"],
+            "citations_count": len(screening_res["requirements_mapping"])
+        })
+
+    # 3. Seed Interview Record for Elena
+    elena_interview = {
+        "candidate_id": "cand-elena-rostova",
+        "role_id": role_id,
+        "notes": SAMPLE_INTERVIEW_ELENA,
+        "answers": {
+            "q-1": "We tuned Kafka partition counts to match max consumer threads and used sticky partitioning to balance batch sizes without latency inflation."
+        },
+        "follow_ups": [
+            {
+                "question": "What happened when that service experienced unexpected latency or a network partition?",
+                "rationale": "Validates resilience under production stress."
+            }
+        ],
+        "updated_at": datetime.datetime.now().isoformat()
+    }
+    upsert_interview(elena_interview)
+
+    return {
+        "status": "success",
+        "role_id": role_id,
+        "candidates_seeded": len(candidates_raw)
+    }
