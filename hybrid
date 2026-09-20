@@ -1,0 +1,98 @@
+from typing import Dict, Any, List, Optional
+from backend.intelligence import nlp_engine, gemini_engine
+from backend.storage import load_settings
+
+def process_candidate_screening(candidate_data: Dict[str, Any], role_data: Dict[str, Any]) -> Dict[str, Any]:
+    settings = load_settings()
+    api_key = settings.get("gemini_api_key")
+    model_name = settings.get("model_name", "gemini-3.8-flash")
+    mode = settings.get("mode", "auto")
+
+    requirements = role_data.get("requirements", [])
+    role_title = role_data.get("title", "Open Role")
+
+    # 1. Core requirement mapping & audit citations (always calculated with exact line citations)
+    mappings, match_score, red_flags = nlp_engine.evaluate_requirement_mapping(requirements, candidate_data)
+    tier_name, tier_color = nlp_engine.assign_candidate_tier(match_score)
+    cohorts = nlp_engine.assign_candidate_cohorts(candidate_data)
+
+    # 2. Executive summary
+    summary = nlp_engine.generate_candidate_summary(candidate_data, role_title, match_score, mappings)
+    gemini_client = None
+    if mode != "nlp_only" and api_key:
+        gemini_client = gemini_engine.get_gemini_client(api_key)
+        if gemini_client:
+            ai_summary = gemini_engine.gemini_enhance_summary(
+                gemini_client, model_name, candidate_data.get("raw_text", ""), role_title, requirements
+            )
+            if ai_summary:
+                summary = ai_summary
+
+    # 3. Role-specific interview questions
+    interview_questions = None
+    if gemini_client and mode != "nlp_only":
+        interview_questions = gemini_engine.gemini_generate_questions(
+            gemini_client, model_name, candidate_data.get("raw_text", ""), role_title, mappings
+        )
+    if not interview_questions:
+        interview_questions = nlp_engine.generate_role_interview_kit(
+            candidate_data, role_data, mappings, red_flags
+        )
+
+    return {
+        "match_score": match_score,
+        "tier": tier_name,
+        "tier_color": tier_color,
+        "cohorts": cohorts,
+        "summary": summary,
+        "requirements_mapping": mappings,
+        "red_flags": red_flags,
+        "interview_questions": interview_questions,
+        "ai_engine_used": "Gemini 3.8 Flash" if gemini_client else "HireFlow Embedded NLP Engine"
+    }
+
+def generate_follow_up_questions(question: str, candidate_answer: str, focus_area: str = "depth") -> List[Dict[str, str]]:
+    settings = load_settings()
+    api_key = settings.get("gemini_api_key")
+    model_name = settings.get("model_name", "gemini-3.8-flash")
+    mode = settings.get("mode", "auto")
+
+    if mode != "nlp_only" and api_key:
+        client = gemini_engine.get_gemini_client(api_key)
+        if client:
+            ai_res = gemini_engine.gemini_dynamic_follow_up(client, model_name, question, candidate_answer, focus_area)
+            if ai_res:
+                return ai_res
+
+    return nlp_engine.generate_dynamic_follow_up(question, candidate_answer, focus_area)
+
+def evaluate_interview_record(notes: str, role_data: Dict[str, Any], candidate_data: Dict[str, Any]) -> Dict[str, Any]:
+    settings = load_settings()
+    api_key = settings.get("gemini_api_key")
+    model_name = settings.get("model_name", "gemini-3.8-flash")
+    mode = settings.get("mode", "auto")
+
+    requirements = role_data.get("requirements", [])
+    role_title = role_data.get("title", "")
+
+    # Always generate the deterministic mapping to requirements
+    base_eval = nlp_engine.evaluate_interview_notes(notes, requirements, candidate_data)
+
+    if mode != "nlp_only" and api_key:
+        client = gemini_engine.get_gemini_client(api_key)
+        if client:
+            ai_eval = gemini_engine.gemini_evaluate_notes(client, model_name, notes, role_title, requirements)
+            if ai_eval:
+                # Merge AI qualitative evaluation with exact requirement evidence
+                base_eval["recommendation"] = ai_eval.get("recommendation", base_eval["recommendation"])
+                base_eval["recommendation_color"] = ai_eval.get("recommendation_color", base_eval["recommendation_color"])
+                base_eval["overall_score"] = ai_eval.get("overall_score", base_eval["overall_score"])
+                base_eval["dimension_scores"] = ai_eval.get("dimension_scores", base_eval["dimension_scores"])
+                base_eval["executive_summary"] = ai_eval.get("executive_summary", base_eval["executive_summary"])
+                if ai_eval.get("unanswered_areas"):
+                    base_eval["unanswered_areas"] = ai_eval["unanswered_areas"]
+
+    return base_eval
+
+def execute_candidate_query(query: str, candidates: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    return nlp_engine.query_candidate_pool(query, candidates)
