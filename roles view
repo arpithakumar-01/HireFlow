@@ -1,0 +1,133 @@
+// Roles Management Component
+const RolesView = {
+  templates: [
+    {
+      title: "Staff Distributed Systems Engineer",
+      dept: "Core Infrastructure",
+      exp: 6,
+      jd: `Role: Staff Distributed Systems Engineer
+Experience: 6+ years
+Responsibilities:
+- Architect high-throughput microservices in Go and Python.
+- Oversee Kubernetes (K8s) clusters on AWS.
+- Design streaming pipelines using Kafka and Redis.
+Requirements:
+- 6+ years backend software engineering.
+- Deep expertise with Go or Python for distributed systems.
+- Production experience with Kubernetes, Docker, and AWS.
+- Kafka and Redis architecture experience.
+- PostgreSQL database design and query tuning.`
+    },
+    {
+      title: "Senior AI/ML Engineer (GenAI & RAG)",
+      dept: "AI Research & Solutions",
+      exp: 4,
+      jd: `Role: Senior AI/ML Engineer
+Experience: 4+ years
+Responsibilities:
+- Build and evaluate generative AI pipelines and RAG architectures.
+- Fine-tune and benchmark foundational models using PyTorch and Hugging Face.
+- Deploy vector databases and low-latency inference APIs.
+Requirements:
+- 4+ years in machine learning engineering.
+- Proficiency in Python, PyTorch, and Transformers.
+- Direct experience with LangChain, LlamaIndex, or vector search (Pinecone, Milvus, Qdrant).
+- Experience shipping production LLM endpoints.`
+    },
+    {
+      title: "Senior Full-Stack Product Engineer",
+      dept: "Growth & Product",
+      exp: 5,
+      jd: `Role: Senior Full-Stack Product Engineer
+Experience: 5+ years
+Responsibilities:
+- Build customer-facing web applications using React, Next.js, and TypeScript.
+- Design scalable REST and GraphQL APIs in Node.js or Python.
+- Optimize frontend web performance, accessibility, and Core Web Vitals.
+Requirements:
+- 5+ years building production web apps.
+- Expert knowledge of modern React, TypeScript, and state management.
+- Backend API proficiency in Node.js (Express/FastAPI).
+- PostgreSQL and Redis experience.`
+    }
+  ],
+
+  openCreateRoleModal() {
+    const modal = document.getElementById('role-modal');
+    if (!modal) return;
+
+    const titleInput = document.getElementById('new-role-title');
+    const deptInput = document.getElementById('new-role-dept');
+    const expInput = document.getElementById('new-role-exp');
+    const jdInput = document.getElementById('new-role-jd');
+    const templateContainer = document.getElementById('role-templates-container');
+
+    // Populate template chips
+    templateContainer.innerHTML = this.templates.map((t, idx) => `
+      <button type="button" data-template-idx="${idx}" class="text-left p-2.5 rounded-lg bg-slate-900/90 border border-slate-800 hover:border-indigo-500/50 hover:bg-slate-800/60 transition group">
+        <div class="text-xs font-semibold text-slate-200 group-hover:text-indigo-300">${t.title}</div>
+        <div class="text-[11px] text-slate-400 mt-0.5">${t.dept} • ${t.exp}+ yrs exp</div>
+      </button>
+    `).join('');
+
+    // Attach click to templates
+    templateContainer.querySelectorAll('[data-template-idx]').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        const idx = parseInt(btn.getAttribute('data-template-idx'));
+        const t = this.templates[idx];
+        titleInput.value = t.title;
+        deptInput.value = t.dept;
+        expInput.value = t.exp;
+        jdInput.value = t.jd;
+      });
+    });
+
+    modal.classList.remove('hidden');
+  },
+
+  closeCreateRoleModal() {
+    const modal = document.getElementById('role-modal');
+    if (modal) modal.classList.add('hidden');
+  },
+
+  async handleRoleSubmit(e) {
+    e.preventDefault();
+    const title = document.getElementById('new-role-title').value.trim();
+    const dept = document.getElementById('new-role-dept').value.trim();
+    const exp = parseInt(document.getElementById('new-role-exp').value) || 3;
+    const jd = document.getElementById('new-role-jd').value.trim();
+
+    if (!title || !jd) {
+      alert("Please provide at least a Role Title and Job Description.");
+      return;
+    }
+
+    const submitBtn = document.getElementById('btn-submit-role');
+    const originalText = submitBtn.innerHTML;
+    submitBtn.innerHTML = `<i data-lucide="loader-2" class="w-4 h-4 animate-spin inline mr-1.5"></i>Parsing Requirements...`;
+
+    try {
+      const created = await API.createRole({
+        title,
+        department: dept,
+        min_experience_years: exp,
+        description: jd
+      });
+
+      const roles = await API.getRoles();
+      State.setRoles(roles);
+      const active = roles.find(r => r.id === created.id);
+      if (active) {
+        State.setCurrentRole(active);
+        const cands = await API.getRoleCandidates(active.id);
+        State.setCandidates(cands);
+      }
+      this.closeCreateRoleModal();
+    } catch (err) {
+      alert("Failed to create role: " + err.message);
+    } finally {
+      submitBtn.innerHTML = originalText;
+      lucide.createIcons();
+    }
+  }
+};
