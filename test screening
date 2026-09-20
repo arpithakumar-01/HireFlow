@@ -1,0 +1,117 @@
+import unittest
+from backend.parsers.jd_parser import parse_job_description
+from backend.parsers.resume_parser import parse_resume
+from backend.intelligence.nlp_engine import (
+    evaluate_requirement_mapping, assign_candidate_tier,
+    generate_role_interview_kit, generate_dynamic_follow_up,
+    evaluate_interview_notes, query_candidate_pool
+)
+
+SAMPLE_JD = """Role: Senior Cloud Platform Engineer
+Experience: 5+ years
+Responsibilities:
+- Build reliable AWS and Kubernetes infrastructure.
+- Design real-time data streaming architectures with Apache Kafka.
+Requirements:
+- 5+ years of software engineering experience.
+- Strong proficiency in Go or Python.
+- Deep expertise in Kubernetes and AWS.
+- Hands-on experience with Kafka and PostgreSQL.
+"""
+
+SAMPLE_RESUME = """Alex Taylor
+alex.taylor@devmail.org | (555) 123-4567 | github.com/ataylor
+
+SUMMARY
+Senior Software Engineer with 6 years experience specializing in cloud infrastructure, Kubernetes, and Go microservices.
+
+SKILLS
+Go, Python, Kubernetes, Docker, AWS, Kafka, PostgreSQL, Redis
+
+EXPERIENCE
+Senior Cloud Engineer | Velocity Systems | 2021 - Present
+- Deployed multi-region Kubernetes clusters on AWS EKS supporting 150k active users.
+- Designed streaming microservices in Go using Kafka, reducing messaging latency by 45%.
+- Maintained PostgreSQL relational database instances with high-availability replication.
+
+Software Engineer | Alpha Innovations | 2018 - 2021
+- Built Python and Docker web services on AWS.
+"""
+
+class TestHireFlowScreening(unittest.TestCase):
+
+    def test_jd_parsing(self):
+        jd_data = parse_job_description(SAMPLE_JD)
+        self.assertIn("Cloud Platform", jd_data["title"])
+        self.assertEqual(jd_data["min_experience_years"], 5)
+        self.assertTrue(len(jd_data["requirements"]) >= 3)
+        skills = jd_data["detected_skills"]
+        self.assertTrue(any(s.lower() in ["kubernetes", "kubernetes (k8s)"] for s in skills))
+
+    def test_resume_parsing(self):
+        cand = parse_resume(SAMPLE_RESUME, filename="Alex_Taylor.pdf")
+        self.assertIn("Alex Taylor", cand["name"])
+        self.assertEqual(cand["email"], "alex.taylor@devmail.org")
+        self.assertGreaterEqual(cand["years_experience"], 5)
+        self.assertIn("Kubernetes", cand["skills"])
+        self.assertIn("Go", cand["skills"])
+        self.assertTrue(len(cand["structured_lines"]) > 5)
+
+    def test_requirement_mapping_and_audit(self):
+        jd_data = parse_job_description(SAMPLE_JD)
+        cand = parse_resume(SAMPLE_RESUME)
+        mappings, score, red_flags = evaluate_requirement_mapping(jd_data["requirements"], cand)
+
+        self.assertGreaterEqual(score, 75.0)
+        matched = [m for m in mappings if m["status"] == "MATCHED"]
+        self.assertGreater(len(matched), 0)
+
+        # Verify audit citation presence
+        first_match = matched[0]
+        self.assertIn("citation", first_match)
+        self.assertTrue(len(first_match["citation"]["snippet"]) > 0)
+        self.assertGreater(first_match["citation"]["line_number"], 0)
+
+        # Tier assignment
+        tier_name, tier_color = assign_candidate_tier(score)
+        self.assertIn("Tier 1", tier_name)
+
+    def test_interview_question_generation(self):
+        jd_data = parse_job_description(SAMPLE_JD)
+        cand = parse_resume(SAMPLE_RESUME)
+        mappings, score, red_flags = evaluate_requirement_mapping(jd_data["requirements"], cand)
+        
+        questions = generate_role_interview_kit(cand, jd_data, mappings, red_flags)
+        self.assertGreaterEqual(len(questions), 3)
+        for q in questions:
+            self.assertIn("question", q)
+            self.assertIn("evaluation_criteria", q)
+            self.assertIn("strong_signal", q["evaluation_criteria"])
+
+    def test_dynamic_follow_up(self):
+        q = "Can you detail a complex technical challenge you faced when implementing Kafka?"
+        ans = "We had an issue where some consumers were lagging behind during traffic spikes."
+        follow_ups = generate_dynamic_follow_up(q, ans, focus_area="depth")
+        self.assertGreaterEqual(len(follow_ups), 2)
+        self.assertIn("prompt", follow_ups[0])
+        self.assertIn("rationale", follow_ups[0])
+
+    def test_interview_notes_evaluation(self):
+        jd_data = parse_job_description(SAMPLE_JD)
+        cand = parse_resume(SAMPLE_RESUME)
+        notes = "Candidate demonstrated solid grasp of Kubernetes EKS and Kafka partition tuning. Very clear explanations and strong metrics."
+        eval_report = evaluate_interview_notes(notes, jd_data["requirements"], cand)
+        self.assertIn(eval_report["recommendation"], ["STRONG HIRE", "HIRE", "LEAN NO", "STRONG NO"])
+        self.assertIn("dimension_scores", eval_report)
+        self.assertIn("unanswered_areas", eval_report)
+
+    def test_nl_query_engine(self):
+        cand = parse_resume(SAMPLE_RESUME)
+        candidates = [cand]
+        results = query_candidate_pool("Who has Kubernetes and Kafka experience?", candidates)
+        self.assertEqual(len(results), 1)
+        self.assertGreater(results[0]["relevance_score"], 40)
+        self.assertTrue(len(results[0]["highlights"]) > 0)
+
+if __name__ == "__main__":
+    unittest.main()
