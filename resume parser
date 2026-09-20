@@ -1,0 +1,195 @@
+import os
+import re
+from pathlib import Path
+from typing import Dict, Any, List, Tuple
+from pypdf import PdfReader
+import docx
+
+KNOWN_SKILL_CATALOG = [
+    # Languages
+    "python", "javascript", "typescript", "golang", "go", "java", "c++", "c#", "rust", "ruby", "php", "swift", "kotlin", "scala", "sql", "r", "bash", "shell",
+    # Frameworks & Libraries
+    "react", "react.js", "react native", "next.js", "vue", "vue.js", "angular", "node.js", "nodejs", "express", "fastapi", "django", "flask", "spring", "spring boot", ".net", "dotnet", "graphql", "rest", "grpc", "tailwind", "redux",
+    # Cloud & DevOps
+    "aws", "amazon web services", "azure", "gcp", "google cloud", "docker", "kubernetes", "k8s", "terraform", "ansible", "ci/cd", "github actions", "gitlab ci", "jenkins", "linux", "nginx", "helm", "prometheus", "grafana",
+    # Databases & Queues
+    "postgresql", "postgres", "mysql", "mongodb", "redis", "elasticsearch", "cassandra", "kafka", "rabbitmq", "dynamodb", "snowflake", "bigquery",
+    # Architecture & Concepts
+    "microservices", "distributed systems", "system design", "event-driven", "api design", "concurrency", "scalability", "high availability", "unit testing", "tdd", "ci/cd pipelines",
+    # AI/ML
+    "machine learning", "deep learning", "nlp", "llm", "genai", "pytorch", "tensorflow", "scikit-learn", "langchain", "rag", "hugging face", "vector database"
+]
+
+def extract_text_from_file(file_path: str) -> str:
+    path = Path(file_path)
+    suffix = path.suffix.lower()
+
+    if suffix == ".pdf":
+        try:
+            reader = PdfReader(file_path)
+            pages_text = []
+            for i, page in enumerate(reader.pages):
+                text = page.extract_text() or ""
+                pages_text.append(text)
+            return "\n\n".join(pages_text)
+        except Exception as e:
+            return f"Error reading PDF: {e}"
+
+    elif suffix in [".docx", ".doc"]:
+        try:
+            doc = docx.Document(file_path)
+            paras = [p.text for p in doc.paragraphs if p.text.strip()]
+            return "\n".join(paras)
+        except Exception as e:
+            return f"Error reading DOCX: {e}"
+
+    else: # txt, md, etc.
+        try:
+            with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                return f.read()
+        except Exception as e:
+            return f"Error reading text file: {e}"
+
+def segment_resume_lines(raw_text: str) -> List[Dict[str, Any]]:
+    """Breaks text into line objects with line numbers for audit trail citations."""
+    lines = raw_text.splitlines()
+    structured_lines = []
+    line_idx = 1
+    for line in lines:
+        cleaned = line.strip()
+        if cleaned:
+            structured_lines.append({
+                "line_no": line_idx,
+                "text": cleaned
+            })
+        line_idx += 1
+    return structured_lines
+
+def parse_resume(raw_text: str, filename: str = "") -> Dict[str, Any]:
+    """Extracts candidate profile, experience items, skills, education, and audit anchors."""
+    lines = [l.strip() for l in raw_text.splitlines() if l.strip()]
+    full_text_lower = raw_text.lower()
+
+    # 1. Candidate Name detection
+    name = "Candidate"
+    if lines:
+        candidate_first_lines = lines[:5]
+        for candidate_line in candidate_first_lines:
+            # Check if line looks like a name (2-4 words, capitalized, no special punctuation or emails)
+            clean_line = re.sub(r'[^a-zA-Z\s]', '', candidate_line).strip()
+            words = clean_line.split()
+            if 2 <= len(words) <= 4 and not any(w.lower() in ["resume", "curriculum", "vitae", "summary", "profile", "contact", "email", "phone", "developer", "engineer"] for w in words):
+                name = clean_line
+                break
+        if name == "Candidate" and filename:
+            # fallback to base filename without extension
+            base = Path(filename).stem
+            name = re.sub(r'[-_]', ' ', base).title()
+
+    # 2. Contact details
+    email_match = re.search(r'[\w\.-]+@[\w\.-]+\.\w+', raw_text)
+    email = email_match.group(0) if email_match else "Not provided"
+
+    phone_match = re.search(r'(\+?\d{1,3}[-.\s]?)?(\(?\d{3}\)?[-.\s]?)?\d{3}[-.\s]?\d{4}', raw_text)
+    phone = phone_match.group(0) if phone_match else "Not provided"
+
+    links = re.findall(r'(?:https?://)?(?:www\.)?(?:github\.com|linkedin\.com)/\S+', raw_text)
+
+    # 3. Detect Sections
+    sections = {
+        "summary": [],
+        "experience": [],
+        "skills": [],
+        "education": [],
+        "projects": [],
+        "certifications": [],
+        "other": []
+    }
+    
+    current_sec = "summary"
+    for line in lines:
+        lower_l = line.lower()
+        if re.match(r'^(experience|work experience|employment history|professional experience)', lower_l):
+            current_sec = "experience"
+            continue
+        elif re.match(r'^(skills|technical skills|technologies|core competencies|tools)', lower_l):
+            current_sec = "skills"
+            continue
+        elif re.match(r'^(education|academic background|qualifications)', lower_l):
+            current_sec = "education"
+            continue
+        elif re.match(r'^(projects|key projects|featured work)', lower_l):
+            current_sec = "projects"
+            continue
+        elif re.match(r'^(certifications|licenses|courses)', lower_l):
+            current_sec = "certifications"
+            continue
+        elif re.match(r'^(summary|professional summary|about me|profile)', lower_l):
+            current_sec = "summary"
+            continue
+
+        sections[current_sec].append(line)
+
+    # 4. Extract Skills
+    detected_skills = []
+    for skill in KNOWN_SKILL_CATALOG:
+        # Match whole words or standard patterns
+        pattern = r'\b' + re.escape(skill) + r'\b'
+        if re.search(pattern, full_text_lower):
+            display_name = skill.upper() if len(skill) <= 3 and skill not in ["sql", "vue", "r", "go"] else skill.title()
+            if skill == "go": display_name = "Go"
+            elif skill == "aws": display_name = "AWS"
+            elif skill == "gcp": display_name = "GCP"
+            elif skill in ["k8s", "kubernetes"]: display_name = "Kubernetes"
+            elif skill in ["react", "react.js"]: display_name = "React"
+            elif skill in ["node.js", "nodejs"]: display_name = "Node.js"
+            elif skill in ["vue", "vue.js"]: display_name = "Vue.js"
+            elif skill == "ci/cd": display_name = "CI/CD"
+            elif skill == "postgresql": display_name = "PostgreSQL"
+            if display_name not in detected_skills:
+                detected_skills.append(display_name)
+
+    # 5. Extract Years of Experience
+    years_matches = re.findall(r'(\d{1,2})\+?\s*(?:years|yrs)\s+(?:of\s+)?experience', full_text_lower)
+    if years_matches:
+        years_exp = max(int(y) for y in years_matches)
+    else:
+        # Estimate by counting year ranges like 2018 - 2023 or 2019 - Present
+        year_ranges = re.findall(r'(20\d\d)\s*[-–—to]+\s*(20\d\d|present|current)', full_text_lower)
+        if year_ranges:
+            total_span = 0
+            for start_yr, end_yr in year_ranges:
+                s = int(start_yr)
+                e = 2026 if end_yr in ["present", "current"] else int(end_yr)
+                total_span += max(0, e - s)
+            years_exp = min(total_span, 25)
+        else:
+            years_exp = 3 # default reasonable baseline if undetermined
+
+    # 6. Structured Experience snippets
+    experience_text = "\n".join(sections["experience"])
+    projects_text = "\n".join(sections["projects"])
+    education_text = "\n".join(sections["education"])
+    summary_text = "\n".join(sections["summary"][:6]) if sections["summary"] else "\n".join(lines[:4])
+
+    structured_lines = segment_resume_lines(raw_text)
+
+    return {
+        "name": name,
+        "email": email,
+        "phone": phone,
+        "links": links,
+        "summary": summary_text,
+        "years_experience": years_exp,
+        "skills": detected_skills,
+        "sections": {
+            "summary": summary_text,
+            "experience": experience_text,
+            "skills": "\n".join(sections["skills"]),
+            "education": education_text,
+            "projects": projects_text,
+            "certifications": "\n".join(sections["certifications"])
+        },
+        "raw_text": raw_text,
+        "structured_lines": structured_lines
+    }
