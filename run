@@ -1,0 +1,39 @@
+import os
+import sys
+import uvicorn
+
+# Ensure UTF-8 output on Windows consoles
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
+from backend.config import HOST, PORT
+from backend.seed_data import seed_demo_data
+from backend.storage import load_db
+
+def main():
+    print("=" * 65)
+    print(" [HIREFLOW] AI Candidate Screening & Interview Intelligence Agent")
+    print("=" * 65)
+    
+    # Auto-seed if database is empty
+    db = load_db()
+    if not db.get("roles"):
+        print("[*] First run detected: Seeding realistic demo role and multi-tier resumes...")
+        try:
+            seed_demo_data()
+            print("[+] Demo showcase seeded successfully!")
+        except Exception as e:
+            print(f"[-] Note: Demo seed initialization: {e}")
+
+    print(f"\n>> Web Application running at: http://{HOST}:{PORT}")
+    print(f">> API Documentation at:      http://{HOST}:{PORT}/docs")
+    print("=" * 65)
+    print("Press Ctrl+C to stop the server.\n")
+
+    uvicorn.run("backend.app:app", host=HOST, port=PORT, reload=False)
+
+if __name__ == "__main__":
+    main()
