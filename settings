@@ -1,0 +1,61 @@
+// Settings & AI Configuration Modal
+const SettingsModal = {
+  async open() {
+    const modal = document.getElementById('settings-modal');
+    if (!modal) return;
+
+    try {
+      const settings = await API.getSettings();
+      const keyInput = document.getElementById('settings-gemini-key');
+      const modelSelect = document.getElementById('settings-model');
+      const modeSelect = document.getElementById('settings-mode');
+      const statusText = document.getElementById('settings-key-status');
+
+      if (keyInput) keyInput.placeholder = settings.has_api_key ? `Stored: ${settings.masked_api_key}` : "Enter Gemini API Key (e.g. AIzaSy...)";
+      if (modelSelect) modelSelect.value = settings.model_name || "gemini-3.8-flash";
+      if (modeSelect) modeSelect.value = settings.mode || "auto";
+
+      if (statusText) {
+        statusText.innerHTML = settings.has_api_key 
+          ? `<span class="text-emerald-400 font-semibold flex items-center space-x-1"><i data-lucide="check-circle" class="w-3.5 h-3.5 inline"></i><span>Gemini Key Active (${settings.masked_api_key})</span></span>`
+          : `<span class="text-amber-400 font-semibold flex items-center space-x-1"><i data-lucide="info" class="w-3.5 h-3.5 inline"></i><span>Operating with Built-in Embedded NLP Engine</span></span>`;
+        lucide.createIcons();
+      }
+
+      modal.classList.remove('hidden');
+    } catch (e) {
+      alert("Failed to load settings: " + e.message);
+    }
+  },
+
+  close() {
+    const modal = document.getElementById('settings-modal');
+    if (modal) modal.classList.add('hidden');
+  },
+
+  async handleSave(e) {
+    e.preventDefault();
+    const keyInput = document.getElementById('settings-gemini-key');
+    const modelSelect = document.getElementById('settings-model');
+    const modeSelect = document.getElementById('settings-mode');
+    const saveBtn = document.getElementById('btn-save-settings');
+
+    saveBtn.innerHTML = `<i data-lucide="loader-2" class="w-3.5 h-3.5 animate-spin inline mr-1"></i> Saving...`;
+    lucide.createIcons();
+
+    try {
+      await API.updateSettings({
+        gemini_api_key: keyInput?.value?.trim() || undefined,
+        model_name: modelSelect?.value,
+        mode: modeSelect?.value
+      });
+      alert("Settings saved successfully!");
+      this.close();
+    } catch (err) {
+      alert("Error saving settings: " + err.message);
+    } finally {
+      saveBtn.innerHTML = "Save Settings";
+      lucide.createIcons();
+    }
+  }
+};
