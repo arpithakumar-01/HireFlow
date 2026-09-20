@@ -1,0 +1,79 @@
+// HireFlow State Management
+const State = {
+  roles: [],
+  currentRole: null,
+  candidates: [],
+  selectedCandidate: null,
+  activeTierFilter: 'all',
+  activeSeniorityFilter: 'all',
+  activeDomainFilter: 'all',
+  searchQuery: '',
+  searchResults: null,
+  settings: null,
+  activeView: 'candidates', // 'candidates', 'interview', 'roles'
+  listeners: [],
+
+  subscribe(listener) {
+    this.listeners.push(listener);
+  },
+
+  notify(event, payload) {
+    this.listeners.forEach(fn => fn(event, payload));
+  },
+
+  setRoles(roles) {
+    this.roles = roles;
+    if (!this.currentRole && roles.length > 0) {
+      this.currentRole = roles[0];
+    } else if (this.currentRole) {
+      const updated = roles.find(r => r.id === this.currentRole.id);
+      this.currentRole = updated || (roles[0] || null);
+    }
+    this.notify('roles_updated', this.roles);
+  },
+
+  setCurrentRole(role) {
+    this.currentRole = role;
+    this.searchResults = null;
+    this.searchQuery = '';
+    this.notify('role_selected', this.currentRole);
+  },
+
+  setCandidates(candidates) {
+    this.candidates = candidates;
+    this.notify('candidates_updated', this.candidates);
+  },
+
+  setSelectedCandidate(candidate) {
+    this.selectedCandidate = candidate;
+    this.notify('candidate_selected', this.selectedCandidate);
+  },
+
+  setFilters({ tier, seniority, domain }) {
+    if (tier !== undefined) this.activeTierFilter = tier;
+    if (seniority !== undefined) this.activeSeniorityFilter = seniority;
+    if (domain !== undefined) this.activeDomainFilter = domain;
+    this.notify('filters_changed', {
+      tier: this.activeTierFilter,
+      seniority: this.activeSeniorityFilter,
+      domain: this.activeDomainFilter
+    });
+  },
+
+  setSearchResults(query, results) {
+    this.searchQuery = query;
+    this.searchResults = results;
+    this.notify('search_results_updated', { query, results });
+  },
+
+  clearSearch() {
+    this.searchQuery = '';
+    this.searchResults = null;
+    this.notify('search_cleared', null);
+  },
+
+  setView(viewName) {
+    this.activeView = viewName;
+    this.notify('view_changed', viewName);
+  }
+};
