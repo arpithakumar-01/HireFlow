@@ -1,0 +1,321 @@
+// Candidate Deep-Dive & Audit Inspector Modal
+const CandidateModal = {
+  activeCandidate: null,
+  activeTab: 'matrix', // 'matrix', 'flags', 'questions', 'resume'
+
+  async open(candidateId) {
+    const modal = document.getElementById('candidate-modal');
+    if (!modal) return;
+
+    try {
+      this.activeCandidate = await API.getCandidate(candidateId);
+      this.render();
+      modal.classList.remove('hidden');
+    } catch (e) {
+      alert("Failed to load candidate: " + e.message);
+    }
+  },
+
+  close() {
+    const modal = document.getElementById('candidate-modal');
+    if (modal) modal.classList.add('hidden');
+  },
+
+  setTab(tab) {
+    this.activeTab = tab;
+    this.render();
+  },
+
+  render() {
+    const c = this.activeCandidate;
+    if (!c) return;
+
+    const modalBody = document.getElementById('candidate-modal-content');
+    if (!modalBody) return;
+
+    const tierClass = {
+      "Tier 1: Strong Match": "badge-emerald",
+      "Tier 2: Strong Contender": "badge-blue",
+      "Tier 3: Potential Fit": "badge-amber",
+      "Tier 4: Substantial Gap": "badge-rose"
+    }[c.tier] || "badge-indigo";
+
+    const mappings = c.requirements_mapping || [];
+    const flags = c.red_flags || [];
+    const questions = c.interview_questions || [];
+
+    modalBody.innerHTML = `
+      <!-- Header Bar -->
+      <div class="p-6 border-b border-slate-800 bg-slate-900/90 flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <div class="flex items-center space-x-3">
+            <h2 class="text-2xl font-black text-white tracking-tight">${c.name}</h2>
+            <span class="px-3 py-1 rounded-full text-xs font-bold ${tierClass}">
+              ${c.tier}
+            </span>
+            <span class="text-xs text-slate-400 font-mono px-2 py-0.5 rounded bg-slate-800 border border-slate-700">
+              ${c.cohorts?.seniority || ''}
+            </span>
+          </div>
+          <div class="text-xs text-slate-400 mt-1 flex flex-wrap items-center gap-3">
+            <span><i data-lucide="mail" class="w-3.5 h-3.5 inline text-indigo-400 mr-1"></i>${c.email}</span>
+            <span><i data-lucide="phone" class="w-3.5 h-3.5 inline text-indigo-400 mr-1"></i>${c.phone}</span>
+            <span><i data-lucide="file-text" class="w-3.5 h-3.5 inline text-indigo-400 mr-1"></i>${c.filename || 'resume'}</span>
+            <span class="text-emerald-400 font-semibold"><i data-lucide="cpu" class="w-3.5 h-3.5 inline mr-1"></i>${c.ai_engine_used || 'Hybrid AI'}</span>
+          </div>
+        </div>
+
+        <div class="flex items-center space-x-4">
+          <div class="text-right">
+            <div class="text-3xl font-black ${c.match_score >= 80 ? 'text-emerald-400' : c.match_score >= 65 ? 'text-blue-400' : 'text-amber-400'}">
+              ${c.match_score}%
+            </div>
+            <div class="text-[10px] text-slate-400 font-semibold uppercase tracking-wider">Overall Match Score</div>
+          </div>
+          <button onclick="InterviewStudio.openForCandidate('${c.id}')" class="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-lg shadow-indigo-500/20 flex items-center space-x-1.5 transition">
+            <i data-lucide="mic" class="w-4 h-4"></i>
+            <span>Start Interview</span>
+          </button>
+          <button onclick="CandidateModal.close()" class="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition">
+            <i data-lucide="x" class="w-5 h-5"></i>
+          </button>
+        </div>
+      </div>
+
+      <!-- Executive Candidate Summary Box -->
+      <div class="px-6 py-4 bg-slate-950/70 border-b border-slate-800/80">
+        <div class="text-xs font-bold uppercase tracking-wider text-indigo-400 mb-1 flex items-center space-x-1.5">
+          <i data-lucide="sparkles" class="w-3.5 h-3.5"></i>
+          <span>Executive Screening Summary</span>
+        </div>
+        <div class="text-xs text-slate-200 leading-relaxed space-y-1">
+          ${c.summary ? c.summary.split('\n\n').map(p => `<p>${p}</p>`).join('') : '<p>Summary processed.</p>'}
+        </div>
+      </div>
+
+      <!-- Tab Navigation -->
+      <div class="flex items-center px-6 border-b border-slate-800 bg-slate-900/60 text-xs font-semibold">
+        <button onclick="CandidateModal.setTab('matrix')" class="py-3 px-4 border-b-2 transition flex items-center space-x-2 ${this.activeTab === 'matrix' ? 'border-indigo-500 text-indigo-400' : 'border-transparent text-slate-400 hover:text-slate-200'}">
+          <i data-lucide="table-2" class="w-4 h-4"></i>
+          <span>Job Requirements Mapping Matrix (${mappings.length})</span>
+        </button>
+        <button onclick="CandidateModal.setTab('flags')" class="py-3 px-4 border-b-2 transition flex items-center space-x-2 ${this.activeTab === 'flags' ? 'border-rose-500 text-rose-400' : 'border-transparent text-slate-400 hover:text-slate-200'}">
+          <i data-lucide="alert-triangle" class="w-4 h-4"></i>
+          <span>Validation Flags & Gaps (${flags.length})</span>
+        </button>
+        <button onclick="CandidateModal.setTab('questions')" class="py-3 px-4 border-b-2 transition flex items-center space-x-2 ${this.activeTab === 'questions' ? 'border-indigo-500 text-indigo-400' : 'border-transparent text-slate-400 hover:text-slate-200'}">
+          <i data-lucide="help-circle" class="w-4 h-4"></i>
+          <span>Tailored Interview Questions (${questions.length})</span>
+        </button>
+        <button onclick="CandidateModal.setTab('resume')" class="py-3 px-4 border-b-2 transition flex items-center space-x-2 ${this.activeTab === 'resume' ? 'border-indigo-500 text-indigo-400' : 'border-transparent text-slate-400 hover:text-slate-200'}">
+          <i data-lucide="file-code" class="w-4 h-4"></i>
+          <span>Raw Resume & Citations</span>
+        </button>
+      </div>
+
+      <!-- Tab Content Area -->
+      <div class="p-6 overflow-y-auto max-h-[calc(85vh-260px)]">
+        ${this.renderActiveTabContent()}
+      </div>
+    `;
+
+    lucide.createIcons();
+  },
+
+  renderActiveTabContent() {
+    const c = this.activeCandidate;
+    if (this.activeTab === 'matrix') {
+      const mappings = c.requirements_mapping || [];
+      return `
+        <div class="space-y-4">
+          <div class="flex items-center justify-between text-xs text-slate-400 mb-2">
+            <span>Each job requirement mapped against extracted resume evidence with line citations for full auditability.</span>
+            <span class="font-mono text-[11px] text-indigo-300">Total Requirements: ${mappings.length}</span>
+          </div>
+
+          <div class="space-y-3">
+            ${mappings.map((m, idx) => {
+              const statusPill = {
+                "MATCHED": `<span class="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-950/60 text-emerald-300 border border-emerald-800/60 flex items-center space-x-1"><i data-lucide="check" class="w-3 h-3"></i><span>Matched (${m.score}%)</span></span>`,
+                "PARTIAL_MATCH": `<span class="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-blue-950/60 text-blue-300 border border-blue-800/60 flex items-center space-x-1"><i data-lucide="clock" class="w-3 h-3"></i><span>Partial (${m.score}%)</span></span>`,
+                "GAP_MISSING": `<span class="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-rose-950/60 text-rose-300 border border-rose-800/60 flex items-center space-x-1"><i data-lucide="alert-octagon" class="w-3 h-3"></i><span>Missing (${m.score}%)</span></span>`,
+                "UNCLEAR": `<span class="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-950/60 text-amber-300 border border-amber-800/60 flex items-center space-x-1"><i data-lucide="help-circle" class="w-3 h-3"></i><span>Unclear (${m.score}%)</span></span>`
+              }[m.status] || `<span class="px-2 py-0.5 rounded text-[11px] bg-slate-800 text-slate-400">${m.status}</span>`;
+
+              return `
+                <div class="p-4 rounded-xl bg-slate-900/80 border border-slate-800 hover:border-slate-700/80 transition">
+                  <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div class="flex items-center space-x-2">
+                      <span class="w-6 h-6 rounded-md bg-slate-800 text-slate-300 font-mono text-xs flex items-center justify-center font-bold">
+                        ${idx + 1}
+                      </span>
+                      <h4 class="text-sm font-bold text-white">${m.title}</h4>
+                      <span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-800 text-slate-400 border border-slate-700">
+                        ${m.category}
+                      </span>
+                    </div>
+                    <div>${statusPill}</div>
+                  </div>
+
+                  <!-- Justification -->
+                  <p class="text-xs text-slate-300 mt-2 pl-8">
+                    ${m.justification}
+                  </p>
+
+                  <!-- Audit Trail Citation Box -->
+                  <div class="mt-3 ml-8 p-2.5 rounded-lg citation-box text-xs">
+                    <div class="flex items-center justify-between mb-1 text-[11px] text-indigo-300 font-semibold">
+                      <span class="flex items-center space-x-1">
+                        <i data-lucide="bookmark" class="w-3 h-3 inline"></i>
+                        <span>Audit Citation: [Section: ${m.citation?.section || 'Experience'} • Line ${m.citation?.line_number || 'N/A'}]</span>
+                      </span>
+                      <button onclick="CandidateModal.jumpToResume(${m.citation?.line_number})" class="text-indigo-400 hover:text-indigo-200 underline text-[10px]">
+                        Inspect Source
+                      </button>
+                    </div>
+                    <blockquote class="text-slate-300 italic font-mono text-[11px]">
+                      "${m.citation?.snippet || 'No direct text'}"
+                    </blockquote>
+                  </div>
+
+                </div>
+              `;
+            }).join('')}
+          </div>
+        </div>
+      `;
+    }
+
+    if (this.activeTab === 'flags') {
+      const flags = c.red_flags || [];
+      if (flags.length === 0) {
+        return `
+          <div class="p-8 text-center glass-panel rounded-xl">
+            <i data-lucide="shield-check" class="w-12 h-12 text-emerald-400 mx-auto mb-2"></i>
+            <h4 class="text-base font-bold text-white">No Critical Validation Gaps Detected</h4>
+            <p class="text-xs text-slate-400 mt-1">All key claims on the candidate's profile are backed by corresponding experience and tenure history.</p>
+          </div>
+        `;
+      }
+
+      return `
+        <div class="space-y-4">
+          <p class="text-xs text-slate-400 mb-2">
+            The AI screening agent identified areas with ambiguous evidence, unverified skill claims, or duration discrepancies that require human recruiter validation.
+          </p>
+
+          <div class="space-y-3">
+            ${flags.map(f => `
+              <div class="p-4 rounded-xl bg-slate-900/90 border border-rose-900/40">
+                <div class="flex items-center justify-between">
+                  <div class="flex items-center space-x-2">
+                    <span class="p-1 rounded bg-rose-500/20 text-rose-400">
+                      <i data-lucide="alert-triangle" class="w-4 h-4"></i>
+                    </span>
+                    <h4 class="text-sm font-bold text-rose-300">${f.type}</h4>
+                  </div>
+                  <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${f.severity === 'High' ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30' : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'}">
+                    ${f.severity} Severity
+                  </span>
+                </div>
+
+                <p class="text-xs text-slate-300 mt-2">${f.description}</p>
+
+                <!-- Suggested Recruiter Validation Prompt -->
+                <div class="mt-3 p-3 rounded-lg bg-slate-950/80 border border-slate-800">
+                  <span class="text-[11px] font-bold text-indigo-400 uppercase tracking-wider block mb-1 flex items-center space-x-1">
+                    <i data-lucide="help-circle" class="w-3 h-3 inline"></i>
+                    <span>Recommended Validation Question for Phone Screen:</span>
+                  </span>
+                  <p class="text-xs text-slate-200 italic">"${f.validation_question}"</p>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      `;
+    }
+
+    if (this.activeTab === 'questions') {
+      const questions = c.interview_questions || [];
+      return `
+        <div class="space-y-4">
+          <div class="flex items-center justify-between text-xs text-slate-400 mb-2">
+            <span>Targeted questions automatically generated from this candidate's verified strengths, past projects, and flagged gaps.</span>
+            <button onclick="InterviewStudio.openForCandidate('${c.id}')" class="text-indigo-400 hover:text-indigo-300 underline font-semibold">
+              Open in Live Interview Studio →
+            </button>
+          </div>
+
+          <div class="space-y-4">
+            ${questions.map((q, idx) => `
+              <div class="p-4 rounded-xl bg-slate-900/80 border border-slate-800">
+                <div class="flex items-center justify-between mb-2">
+                  <div class="flex items-center space-x-2">
+                    <span class="w-6 h-6 rounded bg-indigo-500/20 text-indigo-300 font-bold text-xs flex items-center justify-center font-mono">
+                      Q${idx + 1}
+                    </span>
+                    <span class="text-xs font-bold text-indigo-300 uppercase tracking-wider">${q.category}</span>
+                    <span class="text-slate-500">•</span>
+                    <span class="text-xs text-slate-300 font-semibold">${q.competency}</span>
+                  </div>
+                </div>
+
+                <h4 class="text-sm font-bold text-white mb-2 leading-snug">${q.question}</h4>
+
+                <div class="p-2.5 rounded-lg bg-slate-950/80 border border-slate-800 text-xs text-slate-400 mb-2">
+                  <span class="text-slate-500 font-mono text-[10px] block mb-0.5">Motivated By Resume Record:</span>
+                  ${q.resume_context}
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-2 text-[11px] pt-2 border-t border-slate-800/80">
+                  <div class="p-2 rounded bg-emerald-950/20 border border-emerald-900/30 text-emerald-300">
+                    <strong class="block text-emerald-400 mb-0.5">✓ Strong Signal:</strong>
+                    ${q.evaluation_criteria?.strong_signal || 'Clear architecture, metrics, and tradeoffs.'}
+                  </div>
+                  <div class="p-2 rounded bg-rose-950/20 border border-rose-900/30 text-rose-300">
+                    <strong class="block text-rose-400 mb-0.5">✗ Red Flag:</strong>
+                    ${q.evaluation_criteria?.red_flag || 'Vague high-level buzzwords or lack of failure handling.'}
+                  </div>
+                </div>
+
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      `;
+    }
+
+    if (this.activeTab === 'resume') {
+      const lines = c.structured_lines || [];
+      return `
+        <div class="space-y-3">
+          <div class="flex items-center justify-between text-xs text-slate-400">
+            <span>Raw extracted resume text with line indexing for complete audit verification.</span>
+            <span class="font-mono text-indigo-300">${lines.length} lines parsed</span>
+          </div>
+
+          <div id="resume-lines-container" class="bg-slate-950 p-4 rounded-xl border border-slate-800 font-mono text-xs overflow-x-auto select-text space-y-1">
+            ${lines.map(l => `
+              <div id="line-${l.line_no}" class="flex items-start hover:bg-slate-900/80 py-0.5 px-1 rounded transition">
+                <span class="text-slate-600 select-none w-10 text-right pr-3 font-mono text-[10px]">${l.line_no}</span>
+                <span class="text-slate-300 flex-1">${l.text}</span>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      `;
+    }
+  },
+
+  jumpToResume(lineNo) {
+    this.setTab('resume');
+    setTimeout(() => {
+      const el = document.getElementById(`line-${lineNo}`);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        el.classList.add('bg-indigo-950', 'text-indigo-200', 'border-l-2', 'border-indigo-500');
+      }
+    }, 150);
+  }
+};
