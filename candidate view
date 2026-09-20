@@ -1,0 +1,487 @@
+// Candidates View Component
+const CandidatesView = {
+  init() {
+    this.container = document.getElementById('candidates-view-container');
+    State.subscribe((event, payload) => {
+      if (['role_selected', 'candidates_updated', 'filters_changed', 'search_results_updated', 'search_cleared'].includes(event)) {
+        this.render();
+      }
+    });
+  },
+
+  render() {
+    if (!this.container) return;
+    const role = State.currentRole;
+    if (!role) {
+      this.container.innerHTML = `
+        <div class="p-12 text-center">
+          <i data-lucide="briefcase" class="w-12 h-12 text-slate-500 mx-auto mb-3"></i>
+          <h3 class="text-base font-semibold text-slate-200">No Job Role Selected</h3>
+          <p class="text-sm text-slate-400 mt-1">Please select an existing role or create a new job role to start screening candidates.</p>
+          <button onclick="RolesView.openCreateRoleModal()" class="mt-4 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-sm font-semibold transition">
+            Create First Role
+          </button>
+        </div>
+      `;
+      lucide.createIcons();
+      return;
+    }
+
+    let candidates = State.candidates || [];
+
+    // Filter candidates based on state
+    if (State.searchResults) {
+      candidates = State.searchResults.map(sr => sr.candidate);
+    } else {
+      if (State.activeTierFilter !== 'all') {
+        candidates = candidates.filter(c => c.tier === State.activeTierFilter);
+      }
+      if (State.activeSeniorityFilter !== 'all') {
+        candidates = candidates.filter(c => c.cohorts?.seniority === State.activeSeniorityFilter);
+      }
+      if (State.activeDomainFilter !== 'all') {
+        candidates = candidates.filter(c => c.cohorts?.domain === State.activeDomainFilter);
+      }
+    }
+
+    // Compute tier counts across all candidates for current role
+    const allCands = State.candidates || [];
+    const tierStats = {
+      "Tier 1: Strong Match": allCands.filter(c => c.tier === "Tier 1: Strong Match").length,
+      "Tier 2: Strong Contender": allCands.filter(c => c.tier === "Tier 2: Strong Contender").length,
+      "Tier 3: Potential Fit": allCands.filter(c => c.tier === "Tier 3: Potential Fit").length,
+      "Tier 4: Substantial Gap": allCands.filter(c => c.tier === "Tier 4: Substantial Gap").length,
+    };
+
+    const avgScore = allCands.length ? Math.round(allCands.reduce((acc, c) => acc + (c.match_score || 0), 0) / allCands.length) : 0;
+
+    this.container.innerHTML = `
+      <!-- Role Summary Header -->
+      <div class="glass-panel rounded-2xl p-6 mb-6 shadow-xl relative overflow-hidden">
+        <div class="absolute -top-16 -right-16 w-64 h-64 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none"></div>
+        <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div>
+            <div class="flex items-center space-x-3">
+              <h2 class="text-2xl font-black tracking-tight text-white">${role.title}</h2>
+              <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                ${role.department}
+              </span>
+              <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-slate-800 text-slate-300 border border-slate-700">
+                ${role.min_experience_years}+ Years Exp Required
+              </span>
+            </div>
+            <p class="text-xs text-slate-400 mt-2 line-clamp-2 max-w-4xl">${role.raw_text?.substring(0, 240)}...</p>
+            
+            <div class="flex flex-wrap gap-1.5 mt-3">
+              ${(role.detected_skills || []).slice(0, 10).map(s => `
+                <span class="px-2 py-0.5 rounded text-[11px] font-medium bg-slate-800/80 text-slate-300 border border-slate-700/60">${s}</span>
+              `).join('')}
+            </div>
+          </div>
+
+          <div class="flex items-center space-x-4 bg-slate-900/80 p-3.5 rounded-xl border border-slate-800/90 self-start md:self-auto">
+            <div class="text-center px-2">
+              <div class="text-2xl font-black text-white">${allCands.length}</div>
+              <div class="text-[11px] font-medium text-slate-400 uppercase tracking-wider">Candidates</div>
+            </div>
+            <div class="w-px h-8 bg-slate-800"></div>
+            <div class="text-center px-2">
+              <div class="text-2xl font-black text-indigo-400">${avgScore}%</div>
+              <div class="text-[11px] font-medium text-slate-400 uppercase tracking-wider">Avg Match</div>
+            </div>
+            <div class="w-px h-8 bg-slate-800"></div>
+            <button id="btn-delete-role" class="p-2 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 text-xs transition" title="Delete Role">
+              <i data-lucide="trash-2" class="w-4 h-4"></i>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Ingestion & Search Bar Row -->
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+        
+        <!-- Multi-Resume Upload Zone -->
+        <div class="glass-panel rounded-2xl p-5 border border-dashed border-indigo-500/40 hover:border-indigo-500/80 transition group relative">
+          <input type="file" id="resume-file-input" multiple accept=".pdf,.docx,.doc,.txt" class="absolute inset-0 opacity-0 cursor-pointer z-10" />
+          <div class="flex flex-col items-center justify-center text-center py-2 pointer-events-none">
+            <div class="w-12 h-12 rounded-xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center mb-2 group-hover:scale-110 transition">
+              <i data-lucide="upload-cloud" class="w-6 h-6"></i>
+            </div>
+            <h4 class="text-sm font-bold text-slate-200">Upload Candidate Resumes</h4>
+            <p class="text-xs text-slate-400 mt-0.5">Drag & drop multiple files or click to browse</p>
+            <div class="flex items-center space-x-1.5 mt-2 text-[11px] text-indigo-300 font-mono">
+              <span class="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700">PDF</span>
+              <span class="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700">DOCX</span>
+              <span class="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700">TXT</span>
+            </div>
+          </div>
+          <div id="upload-status" class="text-xs text-center font-medium mt-1 text-slate-400 hidden"></div>
+        </div>
+
+        <!-- Natural Language Candidate Query Bar -->
+        <div class="lg:col-span-2 glass-panel rounded-2xl p-5 flex flex-col justify-between">
+          <div>
+            <div class="flex items-center justify-between mb-2">
+              <div class="flex items-center space-x-2">
+                <i data-lucide="search" class="w-4 h-4 text-indigo-400"></i>
+                <h4 class="text-sm font-bold text-slate-200">Query Candidate Pool (Natural Language)</h4>
+              </div>
+              <span class="text-[10px] text-slate-400 font-mono">Heuristic + Semantic AI</span>
+            </div>
+            <div class="relative">
+              <input type="text" id="nl-query-input" value="${State.searchQuery}" placeholder="e.g. 'Who has at least 5 years experience and led a Kubernetes migration?'" class="w-full bg-slate-900 text-slate-200 text-xs rounded-xl px-4 py-3 pr-24 border border-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/50" />
+              <button id="btn-run-query" class="absolute right-2 top-2 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow transition">
+                Search
+              </button>
+            </div>
+          </div>
+
+          <!-- Quick Query Suggestions -->
+          <div class="flex flex-wrap items-center gap-2 mt-3">
+            <span class="text-[11px] text-slate-500 font-medium">Try asking:</span>
+            <button class="query-chip text-[11px] px-2 py-0.5 rounded-full bg-slate-800/90 text-slate-300 hover:bg-indigo-600/30 hover:text-indigo-200 border border-slate-700/60 transition">
+              Kubernetes & AWS EKS
+            </button>
+            <button class="query-chip text-[11px] px-2 py-0.5 rounded-full bg-slate-800/90 text-slate-300 hover:bg-indigo-600/30 hover:text-indigo-200 border border-slate-700/60 transition">
+              At least 6 years experience
+            </button>
+            <button class="query-chip text-[11px] px-2 py-0.5 rounded-full bg-slate-800/90 text-slate-300 hover:bg-indigo-600/30 hover:text-indigo-200 border border-slate-700/60 transition">
+              Kafka event-driven streaming
+            </button>
+            ${State.searchResults ? `
+              <button id="btn-clear-query" class="text-[11px] px-2.5 py-0.5 rounded-full bg-rose-500/20 text-rose-300 hover:bg-rose-500/30 border border-rose-500/40 ml-auto flex items-center space-x-1">
+                <i data-lucide="x" class="w-3 h-3 inline"></i> Clear Search
+              </button>
+            ` : ''}
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Candidate Groupings (Tier Cards) -->
+      <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        
+        <div data-tier="Tier 1: Strong Match" class="tier-card cursor-pointer glass-panel p-4 rounded-xl border transition ${State.activeTierFilter === 'Tier 1: Strong Match' ? 'border-emerald-500 bg-emerald-950/20 shadow-lg shadow-emerald-900/20' : 'border-slate-800 hover:border-slate-700'}">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-semibold text-emerald-400 flex items-center space-x-1.5">
+              <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
+              <span>Tier 1: Strong Match</span>
+            </span>
+            <span class="text-lg font-black text-emerald-300">${tierStats["Tier 1: Strong Match"]}</span>
+          </div>
+          <p class="text-[11px] text-slate-400 mt-1">Match score ≥ 80%. All core must-haves satisfied.</p>
+        </div>
+
+        <div data-tier="Tier 2: Strong Contender" class="tier-card cursor-pointer glass-panel p-4 rounded-xl border transition ${State.activeTierFilter === 'Tier 2: Strong Contender' ? 'border-blue-500 bg-blue-950/20 shadow-lg shadow-blue-900/20' : 'border-slate-800 hover:border-slate-700'}">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-semibold text-blue-400 flex items-center space-x-1.5">
+              <span class="w-2 h-2 rounded-full bg-blue-400"></span>
+              <span>Tier 2: Contender</span>
+            </span>
+            <span class="text-lg font-black text-blue-300">${tierStats["Tier 2: Strong Contender"]}</span>
+          </div>
+          <p class="text-[11px] text-slate-400 mt-1">Match score 65-79%. Substantial overlap with minor gaps.</p>
+        </div>
+
+        <div data-tier="Tier 3: Potential Fit" class="tier-card cursor-pointer glass-panel p-4 rounded-xl border transition ${State.activeTierFilter === 'Tier 3: Potential Fit' ? 'border-amber-500 bg-amber-950/20 shadow-lg shadow-amber-900/20' : 'border-slate-800 hover:border-slate-700'}">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-semibold text-amber-400 flex items-center space-x-1.5">
+              <span class="w-2 h-2 rounded-full bg-amber-400"></span>
+              <span>Tier 3: Potential Fit</span>
+            </span>
+            <span class="text-lg font-black text-amber-300">${tierStats["Tier 3: Potential Fit"]}</span>
+          </div>
+          <p class="text-[11px] text-slate-400 mt-1">Match score 50-64%. Transferable skills, needs ramp-up.</p>
+        </div>
+
+        <div data-tier="Tier 4: Substantial Gap" class="tier-card cursor-pointer glass-panel p-4 rounded-xl border transition ${State.activeTierFilter === 'Tier 4: Substantial Gap' ? 'border-rose-500 bg-rose-950/20 shadow-lg shadow-rose-900/20' : 'border-slate-800 hover:border-slate-700'}">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-semibold text-rose-400 flex items-center space-x-1.5">
+              <span class="w-2 h-2 rounded-full bg-rose-400"></span>
+              <span>Tier 4: Substantial Gap</span>
+            </span>
+            <span class="text-lg font-black text-rose-300">${tierStats["Tier 4: Substantial Gap"]}</span>
+          </div>
+          <p class="text-[11px] text-slate-400 mt-1">Match score < 50%. Significant critical skills missing.</p>
+        </div>
+
+      </div>
+
+      <!-- Cohort Filter Bar & Active Filter indicators -->
+      <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+        <div class="flex items-center space-x-2 text-xs">
+          <span class="text-slate-400 font-medium">Filters:</span>
+          ${State.activeTierFilter !== 'all' ? `
+            <span class="px-2.5 py-1 rounded-lg bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 flex items-center space-x-1">
+              <span>${State.activeTierFilter}</span>
+              <button onclick="CandidatesView.clearTierFilter()" class="hover:text-white"><i data-lucide="x" class="w-3 h-3"></i></button>
+            </span>
+          ` : ''}
+          <button onclick="CandidatesView.resetAllFilters()" class="text-[11px] text-slate-500 hover:text-slate-300 underline underline-offset-2">
+            Show all (${allCands.length})
+          </button>
+        </div>
+
+        <div class="text-xs text-slate-400">
+          Showing <span class="font-bold text-white">${candidates.length}</span> candidates
+        </div>
+      </div>
+
+      <!-- Candidates Grid -->
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+        ${candidates.length === 0 ? `
+          <div class="col-span-2 glass-panel p-12 text-center rounded-2xl">
+            <i data-lucide="users" class="w-10 h-10 text-slate-500 mx-auto mb-2"></i>
+            <h4 class="text-sm font-semibold text-slate-300">No candidates match current criteria</h4>
+            <p class="text-xs text-slate-500 mt-1">Upload resumes above or reset active tier/search filters.</p>
+          </div>
+        ` : candidates.map(cand => this.renderCandidateCard(cand)).join('')}
+      </div>
+    `;
+
+    lucide.createIcons();
+    this.attachEvents();
+  },
+
+  renderCandidateCard(cand) {
+    const tierColorClass = {
+      "Tier 1: Strong Match": "badge-emerald",
+      "Tier 2: Strong Contender": "badge-blue",
+      "Tier 3: Potential Fit": "badge-amber",
+      "Tier 4: Substantial Gap": "badge-rose"
+    }[cand.tier] || "badge-indigo";
+
+    const matchedReqs = (cand.requirements_mapping || []).filter(m => m.status === "MATCHED");
+    const flags = cand.red_flags || [];
+
+    // Check if query highlights exist
+    let queryHighlightsHtml = '';
+    if (State.searchResults) {
+      const hit = State.searchResults.find(h => h.candidate.id === cand.id);
+      if (hit && hit.highlights?.length) {
+        queryHighlightsHtml = `
+          <div class="mt-3 p-2 rounded-lg bg-indigo-950/40 border border-indigo-500/30 text-xs text-indigo-200">
+            <div class="text-[10px] uppercase font-bold text-indigo-400 mb-1 flex items-center space-x-1">
+              <i data-lucide="sparkles" class="w-3 h-3 inline"></i>
+              <span>Search Relevance: ${hit.relevance_score}%</span>
+            </div>
+            <ul class="list-disc list-inside space-y-0.5 text-[11px]">
+              ${hit.highlights.map(hl => `<li>${hl}</li>`).join('')}
+            </ul>
+          </div>
+        `;
+      }
+    }
+
+    return `
+      <div class="glass-panel glass-panel-hover rounded-2xl p-5 flex flex-col justify-between relative border border-slate-800/80">
+        <div>
+          
+          <!-- Card Top: Name, Experience & Match Ring -->
+          <div class="flex items-start justify-between">
+            <div>
+              <div class="flex items-center space-x-2">
+                <h3 class="text-lg font-bold text-white tracking-tight">${cand.name}</h3>
+                <span class="px-2 py-0.5 rounded-full text-[11px] font-semibold ${tierColorClass}">
+                  ${cand.tier.split(':')[0]}
+                </span>
+              </div>
+              <div class="text-xs text-slate-400 mt-0.5 flex items-center space-x-2">
+                <span>${cand.cohorts?.seniority || `${cand.years_experience} yrs exp`}</span>
+                <span>•</span>
+                <span>${cand.email || 'Email in resume'}</span>
+              </div>
+            </div>
+
+            <!-- Match Score Circle -->
+            <div class="w-14 h-14 rounded-2xl bg-slate-900 border border-slate-700/80 flex flex-col items-center justify-center shadow-inner">
+              <span class="text-base font-black ${cand.match_score >= 80 ? 'text-emerald-400' : cand.match_score >= 65 ? 'text-blue-400' : cand.match_score >= 50 ? 'text-amber-400' : 'text-rose-400'}">
+                ${cand.match_score}%
+              </span>
+              <span class="text-[9px] uppercase tracking-wider font-semibold text-slate-500">Match</span>
+            </div>
+          </div>
+
+          <!-- Cohort Badges -->
+          <div class="flex flex-wrap gap-1.5 mt-3">
+            <span class="px-2 py-0.5 rounded text-[10px] font-medium bg-slate-800 text-slate-300 border border-slate-700">
+              ${cand.cohorts?.domain || 'Backend Systems'}
+            </span>
+            <span class="px-2 py-0.5 rounded text-[10px] font-medium bg-slate-800 text-slate-300 border border-slate-700">
+              ${cand.years_experience} Years Exp
+            </span>
+            ${flags.length > 0 ? `
+              <span class="px-2 py-0.5 rounded text-[10px] font-medium bg-rose-950/40 text-rose-300 border border-rose-800/40 flex items-center space-x-1">
+                <i data-lucide="alert-triangle" class="w-2.5 h-2.5 inline"></i>
+                <span>${flags.length} Gaps / Flags</span>
+              </span>
+            ` : `
+              <span class="px-2 py-0.5 rounded text-[10px] font-medium bg-emerald-950/40 text-emerald-300 border border-emerald-800/40 flex items-center space-x-1">
+                <i data-lucide="check" class="w-2.5 h-2.5 inline"></i>
+                <span>Verified Core</span>
+              </span>
+            `}
+          </div>
+
+          <!-- Query Highlights if searched -->
+          ${queryHighlightsHtml}
+
+          <!-- Executive Summary Snippet -->
+          <p class="text-xs text-slate-300 mt-3 line-clamp-3 leading-relaxed">
+            ${cand.summary ? cand.summary.replace(/[*#]/g, '') : 'Candidate screening parsed.'}
+          </p>
+
+          <!-- Top Matched Requirements Preview -->
+          <div class="mt-3 pt-3 border-t border-slate-800/80">
+            <div class="text-[11px] font-semibold text-slate-400 mb-1.5 flex items-center justify-between">
+              <span>Verified Competencies (${matchedReqs.length})</span>
+              <span class="text-[10px] text-indigo-400">${(cand.skills || []).length} Detected Skills</span>
+            </div>
+            <div class="flex flex-wrap gap-1">
+              ${matchedReqs.slice(0, 3).map(m => `
+                <span class="px-2 py-0.5 rounded text-[10px] font-medium bg-emerald-950/40 text-emerald-300 border border-emerald-800/40 flex items-center space-x-1">
+                  <i data-lucide="check-circle" class="w-2.5 h-2.5 inline text-emerald-400"></i>
+                  <span class="truncate max-w-[150px]">${m.title}</span>
+                </span>
+              `).join('')}
+              ${matchedReqs.length > 3 ? `<span class="text-[10px] text-slate-500 self-center">+${matchedReqs.length - 3} more</span>` : ''}
+            </div>
+          </div>
+
+        </div>
+
+        <!-- Card Footer Actions -->
+        <div class="mt-4 pt-3 border-t border-slate-800 flex items-center justify-between">
+          <div class="text-[11px] text-slate-500 font-mono">
+            ${cand.filename || 'resume.pdf'}
+          </div>
+
+          <div class="flex items-center space-x-2">
+            <button onclick="CandidateModal.open('${cand.id}')" class="px-3 py-1.5 rounded-lg bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/30 text-xs font-semibold flex items-center space-x-1 transition">
+              <i data-lucide="file-search" class="w-3.5 h-3.5 inline"></i>
+              <span>Screening & Audit</span>
+            </button>
+            <button onclick="InterviewStudio.openForCandidate('${cand.id}')" class="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold flex items-center space-x-1 shadow transition">
+              <i data-lucide="mic" class="w-3.5 h-3.5 inline"></i>
+              <span>Interview</span>
+            </button>
+            <button onclick="CandidatesView.deleteCandidate('${cand.id}')" class="p-1.5 rounded-lg bg-slate-800 hover:bg-rose-900/30 text-slate-400 hover:text-rose-400 transition" title="Delete Candidate">
+              <i data-lucide="trash" class="w-3.5 h-3.5"></i>
+            </button>
+          </div>
+        </div>
+
+      </div>
+    `;
+  },
+
+  attachEvents() {
+    // Resume File Upload
+    const fileInput = document.getElementById('resume-file-input');
+    const uploadStatus = document.getElementById('upload-status');
+    if (fileInput) {
+      fileInput.addEventListener('change', async (e) => {
+        const files = e.target.files;
+        if (!files || files.length === 0) return;
+
+        uploadStatus.classList.remove('hidden');
+        uploadStatus.innerHTML = `<span class="text-indigo-400 font-semibold"><i data-lucide="loader-2" class="w-3 h-3 animate-spin inline mr-1"></i> Screening ${files.length} resume(s)...</span>`;
+        lucide.createIcons();
+
+        try {
+          const res = await API.uploadResumes(State.currentRole.id, files);
+          const cands = await API.getRoleCandidates(State.currentRole.id);
+          State.setCandidates(cands);
+          uploadStatus.innerHTML = `<span class="text-emerald-400 font-semibold">✓ ${res.uploaded_count} resume(s) screened successfully!</span>`;
+          setTimeout(() => { uploadStatus.classList.add('hidden'); }, 4000);
+        } catch (err) {
+          uploadStatus.innerHTML = `<span class="text-rose-400 font-semibold">Error: ${err.message}</span>`;
+        }
+      });
+    }
+
+    // Tier Cards Filter
+    document.querySelectorAll('.tier-card').forEach(card => {
+      card.addEventListener('click', () => {
+        const tier = card.getAttribute('data-tier');
+        if (State.activeTierFilter === tier) {
+          State.setFilters({ tier: 'all' });
+        } else {
+          State.setFilters({ tier: tier });
+        }
+      });
+    });
+
+    // Natural Language Search
+    const searchInput = document.getElementById('nl-query-input');
+    const searchBtn = document.getElementById('btn-run-query');
+    const doSearch = async () => {
+      const q = searchInput.value.trim();
+      if (!q) {
+        State.clearSearch();
+        return;
+      }
+      searchBtn.innerHTML = `<i data-lucide="loader-2" class="w-3 h-3 animate-spin inline mr-1"></i> Searching...`;
+      try {
+        const res = await API.queryCandidates(State.currentRole.id, q);
+        State.setSearchResults(q, res.results);
+      } catch (err) {
+        alert("Query error: " + err.message);
+      } finally {
+        searchBtn.innerHTML = "Search";
+        lucide.createIcons();
+      }
+    };
+
+    if (searchBtn) searchBtn.addEventListener('click', doSearch);
+    if (searchInput) {
+      searchInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') doSearch();
+      });
+    }
+
+    // Query chips
+    document.querySelectorAll('.query-chip').forEach(btn => {
+      btn.addEventListener('click', () => {
+        if (searchInput) {
+          searchInput.value = btn.innerText.trim();
+          doSearch();
+        }
+      });
+    });
+
+    const clearBtn = document.getElementById('btn-clear-query');
+    if (clearBtn) {
+      clearBtn.addEventListener('click', () => State.clearSearch());
+    }
+
+    // Delete role button
+    const delRoleBtn = document.getElementById('btn-delete-role');
+    if (delRoleBtn) {
+      delRoleBtn.addEventListener('click', async () => {
+        if (confirm(`Are you sure you want to delete the role "${State.currentRole.title}" and its candidates?`)) {
+          await API.deleteRole(State.currentRole.id);
+          const roles = await API.getRoles();
+          State.setRoles(roles);
+        }
+      });
+    }
+  },
+
+  clearTierFilter() {
+    State.setFilters({ tier: 'all' });
+  },
+
+  resetAllFilters() {
+    State.setFilters({ tier: 'all', seniority: 'all', domain: 'all' });
+    State.clearSearch();
+  },
+
+  async deleteCandidate(candidateId) {
+    if (confirm("Delete this candidate record?")) {
+      await API.deleteCandidate(candidateId);
+      const cands = await API.getRoleCandidates(State.currentRole.id);
+      State.setCandidates(cands);
+    }
+  }
+};
