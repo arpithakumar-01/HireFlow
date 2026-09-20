@@ -1,0 +1,456 @@
+// Live Interview Intelligence Studio & Post-Interview Evaluation
+const InterviewStudio = {
+  candidateId: null,
+  candidate: null,
+  interviewData: null,
+  activeQuestionIndex: 0,
+  evaluationReport: null,
+
+  async openForCandidate(candidateId) {
+    this.candidateId = candidateId;
+    try {
+      this.candidate = await API.getCandidate(candidateId);
+      this.interviewData = await API.getInterview(candidateId);
+      this.render();
+      
+      const modal = document.getElementById('interview-modal');
+      if (modal) modal.classList.remove('hidden');
+    } catch (e) {
+      alert("Failed to load interview studio: " + e.message);
+    }
+  },
+
+  close() {
+    const modal = document.getElementById('interview-modal');
+    if (modal) modal.classList.add('hidden');
+  },
+
+  render() {
+    const container = document.getElementById('interview-modal-content');
+    if (!container || !this.candidate) return;
+
+    const c = this.candidate;
+    const questions = c.interview_questions || [];
+    const currentQ = questions[this.activeQuestionIndex] || questions[0];
+
+    container.innerHTML = `
+      <!-- Top Bar -->
+      <div class="p-5 border-b border-slate-800 bg-slate-900/90 flex flex-col md:flex-row md:items-center justify-between gap-3">
+        <div class="flex items-center space-x-3">
+          <div class="w-10 h-10 rounded-xl bg-indigo-500/20 border border-indigo-500/30 flex items-center justify-center text-indigo-400">
+            <i data-lucide="mic" class="w-5 h-5"></i>
+          </div>
+          <div>
+            <div class="flex items-center space-x-2">
+              <h2 class="text-xl font-bold text-white">${c.name}</h2>
+              <span class="text-xs text-indigo-300 font-semibold px-2 py-0.5 rounded bg-indigo-500/20 border border-indigo-500/30">
+                Interview Intelligence
+              </span>
+            </div>
+            <p class="text-xs text-slate-400">Role: ${State.currentRole?.title || 'Engineer'}</p>
+          </div>
+        </div>
+
+        <div class="flex items-center space-x-3">
+          <button id="btn-save-notes" class="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition flex items-center space-x-1.5">
+            <i data-lucide="save" class="w-3.5 h-3.5"></i>
+            <span>Save Progress</span>
+          </button>
+          <button id="btn-run-evaluation" class="px-4 py-2 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white text-xs font-bold shadow-lg shadow-indigo-500/25 transition flex items-center space-x-1.5">
+            <i data-lucide="award" class="w-4 h-4"></i>
+            <span>Generate Evaluation Report</span>
+          </button>
+          <button onclick="InterviewStudio.close()" class="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition">
+            <i data-lucide="x" class="w-5 h-5"></i>
+          </button>
+        </div>
+      </div>
+
+      <!-- Main Layout: 2 Columns -->
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 p-6 overflow-y-auto max-h-[calc(90vh-140px)]">
+        
+        <!-- Left Column: Interview Questions & Dynamic Follow-Up (7 Cols) -->
+        <div class="lg:col-span-7 space-y-5">
+          
+          <!-- Question Selector Bar -->
+          <div class="flex items-center space-x-2 overflow-x-auto pb-1">
+            ${questions.map((q, idx) => `
+              <button onclick="InterviewStudio.selectQuestion(${idx})" class="px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition ${this.activeQuestionIndex === idx ? 'bg-indigo-600 text-white shadow' : 'bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-slate-200'}">
+                Q${idx + 1}: ${q.category.split(' ')[0]}
+              </button>
+            `).join('')}
+          </div>
+
+          <!-- Active Question Card -->
+          ${currentQ ? `
+            <div class="glass-panel p-5 rounded-2xl border border-slate-800/80 space-y-4">
+              <div>
+                <div class="flex items-center justify-between">
+                  <span class="text-xs font-bold uppercase tracking-wider text-indigo-400">${currentQ.category}</span>
+                  <span class="text-xs text-slate-400 font-mono">${currentQ.competency}</span>
+                </div>
+                <h3 class="text-base font-bold text-white mt-1 leading-snug">${currentQ.question}</h3>
+              </div>
+
+              <!-- Resume Context -->
+              <div class="p-3 rounded-xl bg-slate-950/80 border border-slate-800 text-xs text-slate-300">
+                <span class="text-[10px] uppercase font-bold text-slate-500 block mb-1">Resume Anchor / Context:</span>
+                ${currentQ.resume_context}
+              </div>
+
+              <!-- Good vs Bad signals -->
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                <div class="p-3 rounded-xl bg-emerald-950/20 border border-emerald-900/40 text-emerald-200">
+                  <span class="text-[10px] uppercase font-bold text-emerald-400 block mb-1">✓ What to Look For:</span>
+                  ${currentQ.evaluation_criteria?.strong_signal}
+                </div>
+                <div class="p-3 rounded-xl bg-rose-950/20 border border-rose-900/40 text-rose-200">
+                  <span class="text-[10px] uppercase font-bold text-rose-400 block mb-1">✗ Warning Signals:</span>
+                  ${currentQ.evaluation_criteria?.red_flag}
+                </div>
+              </div>
+
+              <!-- Live Candidate Answer & Follow-up Generator Box -->
+              <div class="pt-3 border-t border-slate-800">
+                <label class="text-xs font-bold text-slate-300 block mb-1.5 flex items-center justify-between">
+                  <span>Record Candidate's Answer:</span>
+                  <span class="text-[11px] text-slate-500 font-normal">Optional: input answer to generate targeted follow-up questions</span>
+                </label>
+                <textarea id="live-answer-input" rows="3" placeholder="Type candidate's verbal response or high-level points..." class="w-full bg-slate-900 text-slate-200 text-xs rounded-xl p-3 border border-slate-700 focus:outline-none focus:ring-1 focus:ring-indigo-500">${this.interviewData?.answers?.[currentQ.id] || ''}</textarea>
+
+                <div class="flex flex-wrap items-center justify-between gap-2 mt-2">
+                  <div class="flex items-center space-x-2">
+                    <span class="text-[11px] text-slate-400 font-medium">Follow-Up Focus:</span>
+                    <select id="follow-up-focus" class="bg-slate-900 text-slate-300 text-xs rounded-lg px-2 py-1 border border-slate-700">
+                      <option value="depth">Technical Depth & Tradeoffs</option>
+                      <option value="individual_contribution">Individual vs Team Contribution</option>
+                      <option value="scale_failure">Scale & Failure Modes</option>
+                    </select>
+                  </div>
+
+                  <button id="btn-gen-followup" class="px-3.5 py-1.5 rounded-lg bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-300 border border-indigo-500/40 text-xs font-semibold flex items-center space-x-1.5 transition">
+                    <i data-lucide="git-branch" class="w-3.5 h-3.5"></i>
+                    <span>Generate AI Follow-up Questions</span>
+                  </button>
+                </div>
+
+                <!-- Follow-up Container -->
+                <div id="followup-results-container" class="mt-3 space-y-2 hidden"></div>
+              </div>
+
+            </div>
+          ` : ''}
+
+        </div>
+
+        <!-- Right Column: Live Interview Notes & Evaluation (5 Cols) -->
+        <div class="lg:col-span-5 space-y-4">
+          
+          <div class="glass-panel p-5 rounded-2xl border border-slate-800/80 flex flex-col h-full">
+            <div class="flex items-center justify-between mb-2">
+              <h4 class="text-sm font-bold text-white flex items-center space-x-2">
+                <i data-lucide="edit-3" class="w-4 h-4 text-indigo-400"></i>
+                <span>Interviewer Scratchpad & Notes</span>
+              </h4>
+              <span class="text-[10px] text-slate-500 font-mono">Auto-evaluated</span>
+            </div>
+            
+            <p class="text-xs text-slate-400 mb-2">
+              Jot down candid observation bullets, technical impressions, or verbatim quotes. The AI will map them back to job competencies and detect gaps.
+            </p>
+
+            <textarea id="live-interview-notes" rows="12" placeholder="e.g. Discussed Kafka partition scaling. Strong knowledge of lag monitoring and offset commits. Handled data skew question well. Did not cover database migration during this round..." class="w-full bg-slate-900/90 text-slate-200 text-xs font-mono rounded-xl p-3 border border-slate-700 focus:outline-none focus:ring-1 focus:ring-indigo-500 flex-1 leading-relaxed">${this.interviewData?.notes || ''}</textarea>
+
+            <div class="mt-3 pt-3 border-t border-slate-800 flex items-center justify-between">
+              <span id="notes-status-text" class="text-[11px] text-slate-500">Changes saved locally</span>
+              <button id="btn-quick-evaluate" class="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow transition">
+                Evaluate Notes Now
+              </button>
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+
+      <!-- Evaluation Report Modal / Drawer -->
+      <div id="evaluation-report-drawer" class="hidden p-6 border-t border-slate-800 bg-slate-950/95 overflow-y-auto max-h-[85vh]"></div>
+    `;
+
+    lucide.createIcons();
+    this.attachStudioEvents();
+  },
+
+  selectQuestion(idx) {
+    // Save current answer first
+    const ansInput = document.getElementById('live-answer-input');
+    const questions = this.candidate.interview_questions || [];
+    const currentQ = questions[this.activeQuestionIndex];
+    if (ansInput && currentQ) {
+      if (!this.interviewData.answers) this.interviewData.answers = {};
+      this.interviewData.answers[currentQ.id] = ansInput.value;
+    }
+
+    this.activeQuestionIndex = idx;
+    this.render();
+  },
+
+  attachStudioEvents() {
+    // Save Notes
+    const saveBtn = document.getElementById('btn-save-notes');
+    if (saveBtn) {
+      saveBtn.addEventListener('click', async () => {
+        await this.persistInterview();
+        const statusText = document.getElementById('notes-status-text');
+        if (statusText) statusText.innerText = "✓ Saved successfully!";
+      });
+    }
+
+    // Dynamic Follow-Up Button
+    const genFollowupBtn = document.getElementById('btn-gen-followup');
+    if (genFollowupBtn) {
+      genFollowupBtn.addEventListener('click', async () => {
+        const questions = this.candidate.interview_questions || [];
+        const currentQ = questions[this.activeQuestionIndex];
+        const ansInput = document.getElementById('live-answer-input');
+        const focusSelect = document.getElementById('follow-up-focus');
+        const resultsContainer = document.getElementById('followup-results-container');
+
+        const candidateAnswer = ansInput?.value.trim();
+        if (!candidateAnswer) {
+          alert("Please type the candidate's answer first to generate tailored follow-up questions.");
+          return;
+        }
+
+        genFollowupBtn.innerHTML = `<i data-lucide="loader-2" class="w-3.5 h-3.5 animate-spin inline mr-1"></i> Generating...`;
+        lucide.createIcons();
+
+        try {
+          const res = await API.requestFollowUp(
+            this.candidateId,
+            currentQ.question,
+            candidateAnswer,
+            focusSelect?.value || 'depth'
+          );
+
+          if (resultsContainer) {
+            resultsContainer.classList.remove('hidden');
+            resultsContainer.innerHTML = `
+              <div class="text-[11px] font-bold text-indigo-400 uppercase tracking-wider mb-1 flex items-center space-x-1">
+                <i data-lucide="sparkles" class="w-3.5 h-3.5 inline"></i>
+                <span>Suggested Follow-Up Probes:</span>
+              </div>
+              <div class="space-y-2">
+                ${res.follow_ups.map(fu => `
+                  <div class="p-3 rounded-lg bg-indigo-950/40 border border-indigo-500/30 text-xs">
+                    <p class="font-bold text-slate-200">"${fu.prompt}"</p>
+                    <span class="text-[10px] text-slate-400 mt-1 block italic font-mono">Why probe this: ${fu.rationale}</span>
+                  </div>
+                `).join('')}
+              </div>
+            `;
+            lucide.createIcons();
+          }
+        } catch (err) {
+          alert("Failed to generate follow-up: " + err.message);
+        } finally {
+          genFollowupBtn.innerHTML = `<i data-lucide="git-branch" class="w-3.5 h-3.5 inline mr-1"></i><span>Generate AI Follow-up</span>`;
+          lucide.createIcons();
+        }
+      });
+    }
+
+    // Evaluation Report Action
+    const evalBtn = document.getElementById('btn-run-evaluation');
+    const quickEvalBtn = document.getElementById('btn-quick-evaluate');
+    const runEval = async () => {
+      const notesEl = document.getElementById('live-interview-notes');
+      const notes = notesEl?.value.trim();
+      if (!notes) {
+        alert("Please enter interview notes to generate the evaluation report.");
+        return;
+      }
+
+      await this.persistInterview();
+
+      evalBtn.innerHTML = `<i data-lucide="loader-2" class="w-4 h-4 animate-spin inline mr-1.5"></i> Evaluating Evidence...`;
+      lucide.createIcons();
+
+      try {
+        const report = await API.evaluateInterview(this.candidateId, notes);
+        this.renderEvaluationReport(report);
+      } catch (err) {
+        alert("Evaluation failed: " + err.message);
+      } finally {
+        evalBtn.innerHTML = `<i data-lucide="award" class="w-4 h-4 inline mr-1.5"></i><span>Generate Evaluation Report</span>`;
+        lucide.createIcons();
+      }
+    };
+
+    if (evalBtn) evalBtn.addEventListener('click', runEval);
+    if (quickEvalBtn) quickEvalBtn.addEventListener('click', runEval);
+  },
+
+  async persistInterview() {
+    const notesEl = document.getElementById('live-interview-notes');
+    const ansInput = document.getElementById('live-answer-input');
+    const questions = this.candidate.interview_questions || [];
+    const currentQ = questions[this.activeQuestionIndex];
+
+    if (ansInput && currentQ) {
+      if (!this.interviewData.answers) this.interviewData.answers = {};
+      this.interviewData.answers[currentQ.id] = ansInput.value;
+    }
+
+    if (notesEl) {
+      this.interviewData.notes = notesEl.value;
+    }
+
+    await API.saveInterview(this.candidateId, this.interviewData);
+  },
+
+  renderEvaluationReport(report) {
+    const drawer = document.getElementById('evaluation-report-drawer');
+    if (!drawer) return;
+
+    drawer.classList.remove('hidden');
+
+    const recColorClass = {
+      "STRONG HIRE": "badge-emerald text-emerald-300",
+      "HIRE": "badge-blue text-blue-300",
+      "LEAN NO": "badge-amber text-amber-300",
+      "STRONG NO": "badge-rose text-rose-300"
+    }[report.recommendation] || "badge-indigo";
+
+    const dim = report.dimension_scores || {};
+    const unans = report.unanswered_areas || [];
+    const evidence = report.requirement_evidence || [];
+
+    drawer.innerHTML = `
+      <div class="max-w-5xl mx-auto space-y-6">
+        
+        <!-- Header & Final Verdict -->
+        <div class="p-6 rounded-2xl bg-slate-900 border border-slate-800 flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div>
+            <div class="flex items-center space-x-3">
+              <h3 class="text-2xl font-black text-white">Standardized Interview Evaluation</h3>
+              <span class="px-3.5 py-1 rounded-full text-xs font-black tracking-wide uppercase ${recColorClass}">
+                ${report.recommendation}
+              </span>
+            </div>
+            <p class="text-xs text-slate-400 mt-1">Candidate: <strong class="text-white">${this.candidate.name}</strong> • Evaluated against: <strong class="text-white">${State.currentRole?.title}</strong></p>
+          </div>
+
+          <div class="flex items-center space-x-4">
+            <div class="text-center bg-slate-950 px-4 py-2 rounded-xl border border-slate-800">
+              <div class="text-2xl font-black text-indigo-400">${report.overall_score}/100</div>
+              <div class="text-[10px] text-slate-400 font-bold uppercase">Interview Index</div>
+            </div>
+            <button onclick="InterviewStudio.copyReportToClipboard()" class="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition flex items-center space-x-1.5">
+              <i data-lucide="copy" class="w-4 h-4"></i>
+              <span>Copy Scorecard</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Executive Synthesis -->
+        <div class="p-5 rounded-2xl bg-slate-900/80 border border-slate-800">
+          <h4 class="text-xs font-bold uppercase tracking-wider text-indigo-400 mb-2 flex items-center space-x-1.5">
+            <i data-lucide="file-check" class="w-4 h-4"></i>
+            <span>Executive Synthesis & Decision Rationale</span>
+          </h4>
+          <p class="text-xs text-slate-200 leading-relaxed">${report.executive_summary}</p>
+        </div>
+
+        <!-- 4 Dimension Scorecards -->
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div class="p-4 rounded-xl bg-slate-900 border border-slate-800">
+            <div class="text-xs text-slate-400 font-medium">Technical Competency</div>
+            <div class="text-2xl font-black text-white mt-1">${dim.technical_competency || 0}%</div>
+            <div class="w-full bg-slate-800 h-1.5 rounded-full mt-2 overflow-hidden">
+              <div class="bg-indigo-500 h-full" style="width: ${dim.technical_competency || 0}%"></div>
+            </div>
+          </div>
+          <div class="p-4 rounded-xl bg-slate-900 border border-slate-800">
+            <div class="text-xs text-slate-400 font-medium">Problem Solving</div>
+            <div class="text-2xl font-black text-white mt-1">${dim.problem_solving || 0}%</div>
+            <div class="w-full bg-slate-800 h-1.5 rounded-full mt-2 overflow-hidden">
+              <div class="bg-blue-500 h-full" style="width: ${dim.problem_solving || 0}%"></div>
+            </div>
+          </div>
+          <div class="p-4 rounded-xl bg-slate-900 border border-slate-800">
+            <div class="text-xs text-slate-400 font-medium">Communication & Clarity</div>
+            <div class="text-2xl font-black text-white mt-1">${dim.communication || 0}%</div>
+            <div class="w-full bg-slate-800 h-1.5 rounded-full mt-2 overflow-hidden">
+              <div class="bg-purple-500 h-full" style="width: ${dim.communication || 0}%"></div>
+            </div>
+          </div>
+          <div class="p-4 rounded-xl bg-slate-900 border border-slate-800">
+            <div class="text-xs text-slate-400 font-medium">Role & Culture Fit</div>
+            <div class="text-2xl font-black text-white mt-1">${dim.role_fit || 0}%</div>
+            <div class="w-full bg-slate-800 h-1.5 rounded-full mt-2 overflow-hidden">
+              <div class="bg-emerald-500 h-full" style="width: ${dim.role_fit || 0}%"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Unanswered Evaluation Areas Box (Critical Requirement) -->
+        <div class="p-5 rounded-2xl bg-amber-950/30 border border-amber-500/40">
+          <div class="flex items-center space-x-2 text-amber-400 font-bold text-xs uppercase tracking-wider mb-2">
+            <i data-lucide="alert-circle" class="w-4 h-4"></i>
+            <span>Unanswered Evaluation Areas (${unans.length} Undetermined Competencies)</span>
+          </div>
+          <p class="text-xs text-amber-200/90 mb-3">
+            The screening intelligence agent detected that these specific requirements were not adequately explored in the current interview notes:
+          </p>
+          ${unans.length === 0 ? `
+            <p class="text-xs text-emerald-300 font-semibold">✓ All critical job competencies were covered during this interview!</p>
+          ` : `
+            <div class="space-y-2">
+              ${unans.map(u => `
+                <div class="p-3 rounded-xl bg-slate-900/90 border border-amber-900/30 text-xs">
+                  <div class="font-bold text-slate-200 mb-0.5">${u.requirement_title}</div>
+                  <div class="text-amber-300/80 font-mono text-[11px]">${u.suggested_question}</div>
+                </div>
+              `).join('')}
+            </div>
+          `}
+        </div>
+
+        <!-- Evidence Mapped to Requirements -->
+        <div class="p-5 rounded-2xl bg-slate-900/80 border border-slate-800">
+          <h4 class="text-xs font-bold uppercase tracking-wider text-slate-300 mb-3 flex items-center space-x-1.5">
+            <i data-lucide="list-checks" class="w-4 h-4 text-emerald-400"></i>
+            <span>Verified Evidence Mapped to Role Requirements</span>
+          </h4>
+          <div class="space-y-2">
+            ${evidence.map(e => `
+              <div class="p-3 rounded-xl bg-slate-950/80 border border-slate-800 flex items-start space-x-3 text-xs">
+                <span class="p-1 rounded bg-emerald-500/20 text-emerald-400 mt-0.5">
+                  <i data-lucide="check" class="w-3.5 h-3.5"></i>
+                </span>
+                <div>
+                  <strong class="text-slate-200">${e.requirement_title}</strong>
+                  <p class="text-slate-400 text-[11px] mt-0.5">${e.evidence}</p>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+
+      </div>
+    `;
+
+    lucide.createIcons();
+    drawer.scrollIntoView({ behavior: 'smooth' });
+  },
+
+  copyReportToClipboard() {
+    const text = `HIREFLOW EVALUATION REPORT
+Candidate: ${this.candidate.name}
+Role: ${State.currentRole?.title}
+Recommendation: Verified Scorecard`;
+    navigator.clipboard.writeText(text);
+    alert("Evaluation report copied to clipboard!");
+  }
+};
