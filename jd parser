@@ -1,0 +1,125 @@
+import re
+from typing import Dict, Any, List
+from backend.parsers.resume_parser import KNOWN_SKILL_CATALOG
+
+def parse_job_description(raw_text: str, title: str = "", department: str = "", min_exp: int = 0) -> Dict[str, Any]:
+    lines = [l.strip() for l in raw_text.splitlines() if l.strip()]
+    text_lower = raw_text.lower()
+
+    # 1. Infer Title if not provided
+    if not title and lines:
+        for line in lines[:3]:
+            if any(term in line.lower() for term in ["engineer", "developer", "architect", "manager", "lead", "designer", "scientist", "analyst"]):
+                title = line
+                break
+        if not title:
+            title = lines[0] if lines else "New Job Role"
+
+    # 2. Extract Minimum Experience
+    if min_exp <= 0:
+        exp_match = re.search(r'(?:experience[:\s]+)?(\d{1,2})\+?\s*(?:years|yrs)\s*(?:of\s+)?(?:experience)?', text_lower)
+        if exp_match:
+            min_exp = int(exp_match.group(1))
+        else:
+            min_exp = 3
+
+    # 3. Detect Skills Mentioned in JD
+    detected_skills = []
+    for skill in KNOWN_SKILL_CATALOG:
+        pattern = r'\b' + re.escape(skill) + r'\b'
+        if re.search(pattern, text_lower):
+            display = skill.upper() if len(skill) <= 3 and skill not in ["sql", "vue", "r"] else skill.title()
+            if skill == "aws": display = "AWS"
+            elif skill == "gcp": display = "GCP"
+            elif skill == "k8s": display = "Kubernetes (K8s)"
+            elif skill in ["react", "react.js"]: display = "React"
+            elif skill in ["node.js", "nodejs"]: display = "Node.js"
+            elif skill == "ci/cd": display = "CI/CD"
+            if display not in detected_skills:
+                detected_skills.append(display)
+
+    # 4. Extract Structured Requirements
+    # Split into must-haves and nice-to-haves based on headers or bullet points
+    must_have_bullets = []
+    preferred_bullets = []
+    responsibilities = []
+
+    current_mode = "must_have"
+    for line in lines:
+        l_lower = line.lower()
+        if any(h in l_lower for h in ["nice to have", "preferred qualifications", "bonus points", "bonus qualifications", "good to have"]):
+            current_mode = "preferred"
+            continue
+        elif any(h in l_lower for h in ["responsibilities", "what you will do", "duties", "the role"]):
+            current_mode = "responsibilities"
+            continue
+        elif any(h in l_lower for h in ["requirements", "qualifications", "must have", "what we are looking for", "minimum qualifications"]):
+            current_mode = "must_have"
+            continue
+
+        if line.startswith(("-", "*", "•", "1.", "2.", "3.", "4.", "5.")):
+            cleaned_bullet = re.sub(r'^[-*•\d\.]+\s*', '', line).strip()
+            if len(cleaned_bullet) > 10:
+                if current_mode == "must_have":
+                    must_have_bullets.append(cleaned_bullet)
+                elif current_mode == "preferred":
+                    preferred_bullets.append(cleaned_bullet)
+                elif current_mode == "responsibilities":
+                    responsibilities.append(cleaned_bullet)
+
+    # Fallback if no bullet points parsed
+    if not must_have_bullets:
+        must_have_bullets = [
+            f"At least {min_exp}+ years of professional software engineering experience",
+            f"Proficiency in core technologies: {', '.join(detected_skills[:4]) if detected_skills else 'Modern backend/frontend frameworks'}",
+            "Experience designing and implementing scalable services and clean APIs",
+            "Strong automated testing, CI/CD, and version control discipline"
+        ]
+
+    # Convert bullets into formal requirement items with IDs
+    structured_requirements = []
+    req_id = 1
+
+    # Experience requirement
+    structured_requirements.append({
+        "id": f"req-{req_id}",
+        "title": f"{min_exp}+ Years Professional Experience",
+        "description": f"Demonstrated background of at least {min_exp} years in software engineering or related discipline.",
+        "category": "Experience",
+        "weight": "high",
+        "required": True
+    })
+    req_id += 1
+
+    # Technical requirements from bullets
+    for b in must_have_bullets[:6]:
+        structured_requirements.append({
+            "id": f"req-{req_id}",
+            "title": b[:60] + ("..." if len(b) > 60 else ""),
+            "description": b,
+            "category": "Must-Have",
+            "weight": "high",
+            "required": True
+        })
+        req_id += 1
+
+    for p in preferred_bullets[:3]:
+        structured_requirements.append({
+            "id": f"req-{req_id}",
+            "title": p[:60] + ("..." if len(p) > 60 else ""),
+            "description": p,
+            "category": "Preferred",
+            "weight": "medium",
+            "required": False
+        })
+        req_id += 1
+
+    return {
+        "title": title,
+        "department": department or "Engineering",
+        "min_experience_years": min_exp,
+        "detected_skills": detected_skills,
+        "requirements": structured_requirements,
+        "responsibilities": responsibilities,
+        "raw_text": raw_text
+    }
